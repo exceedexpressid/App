@@ -110,8 +110,12 @@
             const [inputOlshopSearch, setInputOlshopSearch] = useState('');
             const [showOlshopDropdown, setShowOlshopDropdown] = useState(false);
             
+            // STATE FORM INPUT PAKET (Uang Berformat)
+            const [valHarga, setValHarga] = useState('');
+            const [valTambahan, setValTambahan] = useState('');
+            
             // STATE FORM INPUT PAKET
-            const [inputFormStatus, setInputFormStatus] = useState('SIAP_ANTAR');
+            const [inputFormStatus, setInputFormStatus] = useState('Siap Antar');
 
             const [cameraStream, setCameraStream] = useState(null);
             const videoRef = useRef(null);
@@ -147,10 +151,18 @@
                 e.preventDefault();
                 const inputId = e.target.kodeUser.value.trim().toLowerCase();
                 const inputPass = e.target.password.value.trim(); 
+                
+                // Login Master Bypass
                 if (inputId === 'exceedexpress.id@gmail.com' && inputPass === 'adminexceed') {
-                    localStorage.setItem('ex_gojek_kurirId', inputId); localStorage.setItem('ex_gojek_kurirName', 'Master Admin');
-                    setKurirId(inputId); setKurirName('Master Admin'); setIsLoggedIn(true); loadData(inputId); return;
+                    localStorage.setItem('ex_gojek_kurirId', inputId); 
+                    localStorage.setItem('ex_gojek_kurirName', 'Exceed Express'); // Diubah sesuai request
+                    setKurirId(inputId); 
+                    setKurirName('Exceed Express'); 
+                    setIsLoggedIn(true); 
+                    loadData(inputId); 
+                    return;
                 }
+                
                 setIsLoading(true); setLoadingMessage('Memverifikasi Akun...');
                 try {
                     const res = await fetch(`${SCRIPT_URL}?action=getInitData`);
@@ -197,16 +209,33 @@
                 alert("Berhasil! Rute pengantaran sudah diperbarui."); setActiveTab('tugas');
             };
 
-            const startCamera = async () => { try { const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }); setCameraStream(stream); setIsCameraFullScreen(true); if (videoRef.current) videoRef.current.srcObject = stream; } catch (err) { alert("Izin kamera ditolak."); } };
+            const startCamera = async () => { 
+                try { 
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }); 
+                    setCameraStream(stream); 
+                    setIsCameraFullScreen(true); 
+                } catch (err) { 
+                    alert("Izin kamera ditolak. Pastikan izinkan akses kamera di browser HP Anda."); 
+                } 
+            };
             const stopCamera = () => { if (cameraStream) { cameraStream.getTracks().forEach(track => track.stop()); setCameraStream(null); } setIsCameraFullScreen(false); };
             const takePhoto = () => { if (videoRef.current && canvasRef.current) { const video = videoRef.current; const canvas = canvasRef.current; canvas.width = video.videoWidth; canvas.height = video.videoHeight; canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height); setCapturedPhoto(canvas.toDataURL('image/jpeg', 0.6)); stopCamera(); } };
             const retakePhoto = () => { setCapturedPhoto(null); startCamera(); };
 
             useEffect(() => { if (activeTab !== 'input' && isCameraFullScreen) { stopCamera(); } }, [activeTab, isCameraFullScreen]);
 
+            // FIX KAMERA HP: Pasang stream ke layar HANYA jika layarnya sudah muncul penuh
+            useEffect(() => {
+                if (isCameraFullScreen && cameraStream && videoRef.current) {
+                    videoRef.current.srcObject = cameraStream;
+                    videoRef.current.setAttribute('playsinline', true); // Penting untuk iOS
+                    videoRef.current.play().catch(e => console.error("Kamera ditahan browser:", e));
+                }
+            }, [isCameraFullScreen, cameraStream]);
+
             const openUpdateModal = (pkg) => {
                 setSelectedPkg(pkg);
-                setUpdateStatusVal(String(pkg.status).toUpperCase() === 'PROSES' ? 'SIAP_ANTAR' : String(pkg.status).toUpperCase());
+                setUpdateStatusVal(String(pkg.status).toUpperCase() === 'PROSES' || String(pkg.status).toUpperCase() === 'SIAP_ANTAR' ? 'Siap Antar' : String(pkg.status).toUpperCase());
                 setIsModalOpen(true);
             };
 
@@ -244,8 +273,9 @@
                 const ongkirAngka = zonaSelect.options[zonaSelect.selectedIndex].getAttribute('data-harga') || 0; 
                 const ongkirKodeTeks = zonaSelect.value; // Simpan Kodenya (TRF)
                 
-                const hargaPaket = e.target.hargaPaket.value || 0; 
-                const tambahanOngkir = e.target.tambahanOngkir.value || 0;
+                // Bersihkan titik format Uang sebelum dikirim ke Database Spreadsheet
+                const hargaPaket = e.target.hargaPaket.value.replace(/\./g, '') || 0; 
+                const tambahanOngkir = e.target.tambahanOngkir.value.replace(/\./g, '') || 0;
                 
                 setIsLoading(true); setLoadingMessage('Mendaftar Resi...');
                 try {
@@ -275,8 +305,10 @@
                         alert(`Berhasil! RESI: ${idPaket}`); 
                         e.target.reset(); 
                         setInputOlshopSearch(''); 
+                        setValHarga('');
+                        setValTambahan('');
                         setCapturedPhoto(null); 
-                        setInputFormStatus('SIAP_ANTAR');
+                        setInputFormStatus('Siap Antar');
                         setActiveTab('tugas'); 
                         loadData(); 
                     } else { alert("Gagal: " + result.message); }
@@ -640,7 +672,20 @@
                                     <div><label className="text-[8px] font-bold text-gray-500 uppercase block mb-1">Alamat Lengkap*</label><textarea name="address" required rows="2" className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2 text-[10px] font-semibold"></textarea></div>
                                     
                                     <div className="grid grid-cols-2 gap-2 relative z-0">
-                                        <div><label className="text-[8px] font-bold text-gray-500 uppercase block mb-1">Hrg Barang</label><input type="number" name="hargaPaket" className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2 text-[10px] font-semibold" /></div>
+                                        <div>
+                                            <label className="text-[8px] font-bold text-gray-500 uppercase block mb-1">Hrg Barang</label>
+                                            <input 
+                                                type="text" 
+                                                inputMode="numeric"
+                                                name="hargaPaket" 
+                                                value={valHarga}
+                                                onChange={(e) => {
+                                                    let v = e.target.value.replace(/\D/g, '');
+                                                    setValHarga(v ? new Intl.NumberFormat('id-ID').format(v) : '');
+                                                }}
+                                                className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2 text-[10px] font-semibold" 
+                                            />
+                                        </div>
                                         <div>
                                             <label className="text-[8px] font-bold text-gray-500 uppercase block mb-1">Kode Zona (TRF)</label>
                                             <select name="ongkirKode" className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2 text-[10px] font-semibold truncate">
@@ -649,7 +694,20 @@
                                             </select>
                                         </div>
                                     </div>
-                                    <div><label className="text-[8px] font-bold text-gray-500 uppercase block mb-1">Tmbhn Ongkir Vol/Jarak</label><input type="number" name="tambahanOngkir" className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2 text-[10px] font-semibold" /></div>
+                                    <div>
+                                        <label className="text-[8px] font-bold text-gray-500 uppercase block mb-1">Tmbhn Ongkir Vol/Jarak</label>
+                                        <input 
+                                            type="text" 
+                                            inputMode="numeric"
+                                            name="tambahanOngkir" 
+                                            value={valTambahan}
+                                            onChange={(e) => {
+                                                let v = e.target.value.replace(/\D/g, '');
+                                                setValTambahan(v ? new Intl.NumberFormat('id-ID').format(v) : '');
+                                            }}
+                                            className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2 text-[10px] font-semibold" 
+                                        />
+                                    </div>
 
                                     {/* LOGIKA FORM STATUS DINAMIS PADA INPUT */}
                                     <div className="border-t border-gray-100 pt-2 mt-2">
@@ -659,7 +717,7 @@
                                             onChange={(e) => setInputFormStatus(e.target.value)} 
                                             className="w-full bg-white border border-emerald-300 text-emerald-800 rounded-lg p-2 text-[10px] font-bold focus:border-emerald-500"
                                         >
-                                            <option value="SIAP_ANTAR">Proses (Siap Antar)</option>
+                                            <option value="Siap Antar">Proses (Siap Antar)</option>
                                             <option value="SUKSES">Sukses Diterima</option>
                                             <option value="PENDING">Pending (Tunda)</option>
                                             <option value="CANCEL">Cancel (Batal)</option>
@@ -813,7 +871,7 @@
                                         <label className="block text-[10px] font-bold text-gray-600 mb-1 ml-1">Status Final</label>
                                         <select name="status" value={updateStatusVal} onChange={(e) => setUpdateStatusVal(e.target.value)} className="w-full p-2.5 bg-white border border-gray-200 rounded-xl text-[11px] font-bold outline-none focus:border-emerald-500">
                                             <option value="SUKSES">✅ Sukses Terkirim</option>
-                                            <option value="SIAP_ANTAR">🚚 Siap Antar (Proses)</option>
+                                            <option value="Siap Antar">🚚 Siap Antar (Proses)</option>
                                             <option value="PENDING">⏱️ Pending</option>
                                             <option value="CANCEL">❌ Cancel</option>
                                         </select>
@@ -862,7 +920,7 @@
                             </div>
                             
                             <div className="flex-1 relative bg-black flex items-center justify-center">
-                                <video ref={videoRef} autoPlay playsInline className="absolute inset-0 w-full h-full object-cover"></video>
+                                <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover"></video>
                                 <div className="absolute inset-0 border-[1px] border-white/20 pointer-events-none grid grid-cols-3 grid-rows-3">
                                     <div className="border-r border-b border-white/20"></div>
                                     <div className="border-b border-white/20"></div>
