@@ -30,10 +30,7 @@
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
         
-        @keyframes slideUp {
-            0% { opacity: 0; transform: translateY(10px); }
-            100% { opacity: 1; transform: translateY(0); }
-        }
+        @keyframes slideUp { 0% { opacity: 0; transform: translateY(10px); } 100% { opacity: 1; transform: translateY(0); } }
         .animate-slide-up { animation: slideUp 0.2s ease-out forwards; }
         
         .glass-nav { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); }
@@ -108,10 +105,13 @@
 
             const [isModalOpen, setIsModalOpen] = useState(false);
             const [selectedPkg, setSelectedPkg] = useState(null);
-            const [updateStatusVal, setUpdateStatusVal] = useState(''); // Tracking status modal update
+            const [updateStatusVal, setUpdateStatusVal] = useState(''); 
             
-            const [inputOlshopSearch, setInputOlshopSearch] = useState(''); // Fitur Pencarian Olshop
+            const [inputOlshopSearch, setInputOlshopSearch] = useState('');
             const [showOlshopDropdown, setShowOlshopDropdown] = useState(false);
+            
+            // STATE FORM INPUT PAKET
+            const [inputFormStatus, setInputFormStatus] = useState('SIAP_ANTAR');
 
             const [cameraStream, setCameraStream] = useState(null);
             const videoRef = useRef(null);
@@ -213,8 +213,6 @@
                 e.preventDefault();
                 const nStatus = e.target.status.value;
                 const nKet = e.target.keterangan ? e.target.keterangan.value : "";
-                
-                // Cek Metode Bayar (Muncul hanya ketika SUKSES)
                 const nMetode = e.target.metodeBayarUpdate ? e.target.metodeBayarUpdate.value : "";
 
                 if (nStatus === 'SUKSES' && !capturedPhoto) { alert("Wajib foto bukti untuk paket SUKSES!"); return; }
@@ -225,11 +223,7 @@
                     formData.append('packageId', selectedPkg.packageId); 
                     formData.append('status', nStatus); 
                     formData.append('keterangan', nKet);
-                    
-                    if (nMetode !== "") {
-                        formData.append('metodeBayar', nMetode);
-                    }
-
+                    if (nMetode !== "") formData.append('metodeBayar', nMetode);
                     if (capturedPhoto) formData.append('fotoBase64', capturedPhoto);
                     
                     const response = await fetch(SCRIPT_URL, { method: 'POST', body: formData, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
@@ -240,16 +234,42 @@
 
             const handleInputBaru = async (e) => {
                 e.preventDefault();
-                // Mengambil value dari input pencarian state (bukan select)
                 const olshopName = inputOlshopSearch; 
                 const customerName = e.target.customerName.value; const address = e.target.address.value;
                 if (!olshopName || !customerName || !address) { alert("Olshop, Customer, dan Alamat wajib!"); return; }
-                const hargaPaket = e.target.hargaPaket.value || 0; const zonaSelect = e.target.ongkirKode; const ongkirDasar = zonaSelect.options[zonaSelect.selectedIndex].getAttribute('data-harga') || 0; const tambahanOngkir = e.target.tambahanOngkir.value || 0;
+                
+                if (inputFormStatus === 'SUKSES' && !capturedPhoto) { alert("Wajib foto bukti jika status Sukses!"); return; }
+
+                // Ambil Data Ongkir
+                const zonaSelect = e.target.ongkirKode; 
+                const ongkirAngka = zonaSelect.options[zonaSelect.selectedIndex].getAttribute('data-harga') || 0; 
+                const ongkirKodeTeks = zonaSelect.value; // Simpan Kodenya (TRF)
+                
+                const hargaPaket = e.target.hargaPaket.value || 0; 
+                const tambahanOngkir = e.target.tambahanOngkir.value || 0;
+                
                 setIsLoading(true); setLoadingMessage('Mendaftar Resi...');
                 try {
                     const idPaket = "EXCD" + Math.floor(100000 + Math.random() * 900000);
-                    const formData = new URLSearchParams(); formData.append('action', 'addPackage'); formData.append('idPaket', idPaket); formData.append('olshopName', olshopName); formData.append('customerName', customerName); formData.append('customerPhone', e.target.customerPhone.value); formData.append('address', address); formData.append('hargaPaket', hargaPaket); formData.append('ongkirDasar', ongkirDasar); formData.append('tambahanOngkir', tambahanOngkir); formData.append('metodeBayar', e.target.metodeBayar.value); formData.append('kurirId', kurirId);
+                    const formData = new URLSearchParams(); 
+                    formData.append('action', 'addPackage'); 
+                    formData.append('idPaket', idPaket); 
+                    formData.append('olshopName', olshopName); 
+                    formData.append('customerName', customerName); 
+                    formData.append('customerPhone', e.target.customerPhone.value); 
+                    formData.append('address', address); 
+                    formData.append('hargaPaket', hargaPaket); 
+                    formData.append('ongkirKode', ongkirKodeTeks); // TRF masuk sini
+                    formData.append('ongkirAngka', ongkirAngka);   // Angka untuk kalkulasi
+                    formData.append('tambahanOngkir', tambahanOngkir); 
+                    formData.append('status', inputFormStatus); 
+                    
+                    if (inputFormStatus === 'SUKSES') formData.append('metodeBayar', e.target.metodeBayar.value);
+                    if (inputFormStatus === 'PENDING' || inputFormStatus === 'CANCEL') formData.append('keterangan', e.target.keteranganForm.value);
+
+                    formData.append('kurirId', kurirId);
                     if (capturedPhoto) formData.append('fotoBase64', capturedPhoto);
+                    
                     const response = await fetch(SCRIPT_URL, { method: 'POST', body: formData, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
                     const result = await response.json();
                     if (result.status === 'success') { 
@@ -257,6 +277,7 @@
                         e.target.reset(); 
                         setInputOlshopSearch(''); 
                         setCapturedPhoto(null); 
+                        setInputFormStatus('SIAP_ANTAR');
                         setActiveTab('tugas'); 
                         loadData(); 
                     } else { alert("Gagal: " + result.message); }
@@ -388,7 +409,6 @@
                                 <span className="text-[8px] font-bold text-emerald-600 flex items-center"><span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mr-1 animate-pulse"></span> Online</span>
                             </div>
                         </div>
-                        {/* TOMBOL REFRESH EXPLICIT DI HEADER */}
                         <div className="flex items-center gap-1.5">
                             <button onClick={() => loadData()} className="bg-white border border-gray-200 shadow-sm px-2.5 py-1.5 flex items-center justify-center rounded-lg hover:bg-gray-50 active:scale-95 text-gray-700 transition-all">
                                 <i className={`fas fa-sync-alt text-[10px] text-emerald-600 mr-1.5 ${isLoading ? 'animate-spin' : ''}`}></i>
@@ -400,7 +420,7 @@
 
                     <main className="flex-1 overflow-y-auto scrollbar-hide bg-gray-50 z-0 pb-16 pt-2 px-2">
                         
-                        {}
+                        {/* TAB: TUGAS ANTARAN */}
                         {activeTab === 'tugas' && (
                             <div className="animate-slide-up">
                                 <div className="flex justify-between items-center mb-2 px-1">
@@ -501,7 +521,7 @@
                             </div>
                         )}
 
-                        {}
+                        {/* TAB: RUTE */}
                         {activeTab === 'rute' && (
                             <div className="animate-slide-up">
                                 <div className="flex justify-between items-center mb-2 px-1">
@@ -534,7 +554,7 @@
                             </div>
                         )}
 
-                        {}
+                        {/* TAB: JEMPUT */}
                         {activeTab === 'jemput' && (
                             <div className="animate-slide-up">
                                 <div className="bg-blue-50 border border-blue-100 p-2.5 rounded-xl mb-3 flex items-start gap-2">
@@ -573,9 +593,9 @@
                             </div>
                         )}
 
-                        {}
+                        {/* TAB: INPUT BARU */}
                         {activeTab === 'input' && (
-                            <div className="animate-slide-up bg-white p-3 rounded-2xl border border-gray-100 shadow-sm">
+                            <div className="animate-slide-up bg-white p-3 rounded-2xl border border-gray-100 shadow-sm relative z-0">
                                 <h2 className="font-black text-gray-800 mb-3 text-[12px] flex items-center"><div className="w-6 h-6 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mr-2"><i className="fas fa-plus text-[10px]"></i></div>Input Resi Baru</h2>
                                 <form onSubmit={handleInputBaru} className="space-y-2 relative">
                                     
@@ -616,37 +636,71 @@
                                     <div><label className="text-[8px] font-bold text-gray-500 uppercase block mb-1">Nama Penerima*</label><input type="text" name="customerName" required className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2 text-[10px] font-semibold" /></div>
                                     <div><label className="text-[8px] font-bold text-gray-500 uppercase block mb-1">No HP</label><input type="tel" name="customerPhone" className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2 text-[10px] font-semibold" /></div>
                                     <div><label className="text-[8px] font-bold text-gray-500 uppercase block mb-1">Alamat Lengkap*</label><textarea name="address" required rows="2" className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2 text-[10px] font-semibold"></textarea></div>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        <div><label className="text-[8px] font-bold text-gray-500 uppercase block mb-1">Metode</label><select name="metodeBayar" className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2 text-[10px] font-semibold"><option value="CASH">CASH</option><option value="TF OLSHOP">TF OL</option><option value="COD">COD</option><option value="TF KANTOR">TF KTR</option></select></div>
-                                        <div><label className="text-[8px] font-bold text-gray-500 uppercase block mb-1">Hrg Barang</label><input type="number" name="hargaPaket" className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2 text-[10px] font-semibold" /></div>
-                                    </div>
+                                    
                                     <div className="grid grid-cols-2 gap-2 relative z-0">
+                                        <div><label className="text-[8px] font-bold text-gray-500 uppercase block mb-1">Hrg Barang</label><input type="number" name="hargaPaket" className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2 text-[10px] font-semibold" /></div>
                                         <div>
-                                            <label className="text-[8px] font-bold text-gray-500 uppercase block mb-1">Zona Ongkir</label>
+                                            <label className="text-[8px] font-bold text-gray-500 uppercase block mb-1">Kode Zona (TRF)</label>
                                             <select name="ongkirKode" className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2 text-[10px] font-semibold truncate">
-                                                <option value="" data-harga="0">Pilih...</option>
-                                                {masterZonas.map((z, i) => <option key={i} value={z.id} data-harga={z.harga}>{z.nama} (Rp {formatCurr(z.harga)})</option>)}
+                                                <option value="" data-harga="0">Pilih Zona...</option>
+                                                {masterZonas.map((z, i) => <option key={i} value={z.id} data-harga={z.harga}>{z.id} ({z.nama}) - Rp {formatCurr(z.harga)}</option>)}
                                             </select>
                                         </div>
-                                        <div><label className="text-[8px] font-bold text-gray-500 uppercase block mb-1">Tmbhn Vol</label><input type="number" name="tambahanOngkir" className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2 text-[10px] font-semibold" /></div>
                                     </div>
-                                    
-                                    {/* AKSES KAMERA LANGSUNG DI FORM INPUT (SIMPAN KE G-DRIVE VIA SERVER) */}
+                                    <div><label className="text-[8px] font-bold text-gray-500 uppercase block mb-1">Tmbhn Ongkir Vol/Jarak</label><input type="number" name="tambahanOngkir" className="w-full bg-gray-50 border border-gray-200 rounded-lg p-2 text-[10px] font-semibold" /></div>
+
+                                    {/* LOGIKA FORM STATUS DINAMIS PADA INPUT */}
+                                    <div className="border-t border-gray-100 pt-2 mt-2">
+                                        <label className="text-[10px] font-bold text-emerald-600 uppercase block mb-1">Status Pengantaran</label>
+                                        <select 
+                                            value={inputFormStatus} 
+                                            onChange={(e) => setInputFormStatus(e.target.value)} 
+                                            className="w-full bg-white border border-emerald-300 text-emerald-800 rounded-lg p-2 text-[10px] font-bold focus:border-emerald-500"
+                                        >
+                                            <option value="SIAP_ANTAR">Proses (Siap Antar)</option>
+                                            <option value="SUKSES">Sukses Diterima</option>
+                                            <option value="PENDING">Pending (Tunda)</option>
+                                            <option value="CANCEL">Cancel (Batal)</option>
+                                        </select>
+                                    </div>
+
+                                    {inputFormStatus === 'SUKSES' && (
+                                        <div className="animate-slide-up bg-emerald-50 border border-emerald-200 p-2 rounded-lg">
+                                            <label className="text-[8px] font-bold text-emerald-800 uppercase block mb-1">Metode Bayar (Wajib)</label>
+                                            <select name="metodeBayar" required className="w-full bg-white border border-emerald-300 rounded-lg p-2 text-[10px] font-bold text-emerald-800">
+                                                <option value="CASH">CASH</option>
+                                                <option value="TF OLSHOP">TF OLSHOP</option>
+                                                <option value="COD">COD</option>
+                                                <option value="TF KANTOR">TF KANTOR</option>
+                                            </select>
+                                        </div>
+                                    )}
+
+                                    {(inputFormStatus === 'PENDING' || inputFormStatus === 'CANCEL') && (
+                                        <div className="animate-slide-up bg-orange-50 border border-orange-200 p-2 rounded-lg">
+                                            <label className="text-[8px] font-bold text-orange-800 uppercase block mb-1">Keterangan / Alasan</label>
+                                            <input type="text" name="keteranganForm" required placeholder="Tulis alasan..." className="w-full bg-white border border-orange-300 rounded-lg p-2 text-[10px] font-bold" />
+                                        </div>
+                                    )}
+
+                                    {/* AKSES KAMERA (Drive Apps Script Upload) */}
                                     <div className="pt-1 relative z-0">
-                                        <label className="text-[8px] font-bold text-gray-500 uppercase block mb-1">Foto Fisik (Tersimpan ke Drive)</label>
+                                        <label className="text-[8px] font-bold text-gray-500 uppercase block mb-1">Foto Bukti Fisik</label>
                                         <div className="bg-gray-50 border border-dashed border-gray-300 rounded-lg overflow-hidden">
                                             {!cameraStream && !capturedPhoto && (<button type="button" onClick={startCamera} className="w-full py-4 text-gray-400 flex flex-col items-center"><i className="fas fa-camera text-sm mb-1"></i><span className="text-[8px] font-bold">Buka Kamera</span></button>)}
                                             <div className={`relative ${cameraStream && !capturedPhoto ? 'block' : 'hidden'}`}><video ref={videoRef} autoPlay playsInline className="w-full max-h-32 object-cover"></video><button type="button" onClick={takePhoto} className="absolute bottom-2 left-1/2 transform -translate-x-1/2 bg-white text-gray-800 w-8 h-8 rounded-full shadow-md flex items-center justify-center text-xs border-2 border-gray-100"><i className="fas fa-circle"></i></button></div>
                                             {capturedPhoto && (<div className="relative"><img src={capturedPhoto} className="w-full max-h-32 object-cover" /><button type="button" onClick={retakePhoto} className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded shadow-md text-[8px] font-bold"><i className="fas fa-redo"></i> Ulang</button></div>)}
                                             <canvas ref={canvasRef} style={{ display: 'none' }}></canvas>
                                         </div>
+                                        {inputFormStatus === 'SUKSES' && !capturedPhoto && <p className="text-[7px] text-red-500 font-bold mt-1 text-center">*Foto Wajib Jika Status Sukses</p>}
                                     </div>
-                                    <button type="submit" disabled={isLoading} className="w-full bg-gray-800 text-white font-bold py-2.5 rounded-lg active:scale-95 mt-3 text-[10px] relative z-0">Buat Resi Baru</button>
+
+                                    <button type="submit" disabled={isLoading} className="w-full bg-gray-800 text-white font-bold py-2.5 rounded-lg active:scale-95 mt-3 text-[10px] relative z-0">Simpan Resi</button>
                                 </form>
                             </div>
                         )}
 
-                        {}
+                        {/* TAB: HISTORI */}
                         {activeTab === 'histori' && (
                             <div className="animate-slide-up">
                                 <h2 className="font-black text-gray-800 text-[13px] mb-2 flex items-center"><i className="fas fa-history text-emerald-500 mr-1.5"></i> Histori Tugas</h2>
@@ -689,7 +743,7 @@
                             </div>
                         )}
 
-                        {}
+                        {/* TAB: SALDO */}
                         {activeTab === 'saldo' && (
                             <div className="animate-slide-up">
                                 <h2 className="font-black text-gray-800 text-[13px] mb-2 flex items-center"><i className="fas fa-wallet text-emerald-500 mr-1.5"></i> Saldo Setoran</h2>
@@ -709,13 +763,13 @@
                                     <div className="bg-white border border-gray-100 p-2.5 rounded-xl text-center"><p className="text-[7px] text-gray-400 font-bold uppercase mb-0.5"><i className="fas fa-hand-holding-usd text-emerald-500 mr-0.5"></i> Uang Cash</p><p className="font-black text-emerald-600 text-[11px]">{formatCurr(rincianCash)}</p></div>
                                     <div className="bg-white border border-gray-100 p-2.5 rounded-xl text-center"><p className="text-[7px] text-gray-400 font-bold uppercase mb-0.5"><i className="fas fa-wallet text-orange-500 mr-0.5"></i> Simpan (Cash)</p><p className="font-black text-orange-500 text-[11px]">{formatCurr(tambahanOngkirCash)}</p></div>
                                 </div>
-                                <div className="bg-white border border-gray-100 p-2.5 rounded-xl text-center"><p className="text-[7px] text-gray-400 font-bold uppercase mb-0.5"><i className="fas fa-cut text-purple-500 mr-0.5"></i> Potong TF (Hak Olshop)</p><p className="font-black text-purple-500 text-[11px]">{formatCurr(tambahanOngkirTF)}</p></div>
+                                <div className="bg-white border border-gray-100 p-2.5 rounded-xl text-center"><p className="text-[7px] text-gray-400 font-bold uppercase mb-0.5"><i className="fas fa-cut text-purple-500 mr-0.5"></i> Potong TF (Hak Kurir/Olshop)</p><p className="font-black text-purple-500 text-[11px]">{formatCurr(tambahanOngkirTF)}</p></div>
                             </div>
                         )}
 
                     </main>
 
-                    {}
+                    {/* BOTTOM NAV */}
                     <nav className="absolute bottom-0 w-full glass-nav flex justify-between items-end h-[56px] z-40 border-t border-gray-100 pb-1.5 px-1">
                         <button onClick={() => setActiveTab('tugas')} className={`flex flex-col items-center flex-1 transition-colors ${activeTab === 'tugas' ? 'text-emerald-600' : 'text-gray-400'}`}><i className="fas fa-motorcycle text-base mb-0.5"></i><span className="text-[7px] font-bold">Antar</span></button>
                         <button onClick={() => setActiveTab('jemput')} className={`flex flex-col items-center flex-1 transition-colors ${activeTab === 'jemput' ? 'text-emerald-600' : 'text-gray-400'}`}><i className="fas fa-truck-pickup text-base mb-0.5"></i><span className="text-[7px] font-bold">Jemput</span></button>
@@ -725,7 +779,7 @@
                         <button onClick={() => setActiveTab('saldo')} className={`flex flex-col items-center flex-1 transition-colors ${activeTab === 'saldo' ? 'text-emerald-600' : 'text-gray-400'}`}><i className="fas fa-wallet text-base mb-0.5"></i><span className="text-[7px] font-bold">Saldo</span></button>
                     </nav>
 
-                    {}
+                    {/* MODAL UPDATE STATUS */}
                     {isModalOpen && selectedPkg && (
                         <div className="absolute inset-0 z-50 bg-white flex flex-col animate-slide-up h-full">
                             <div className="flex items-center justify-between p-3 border-b border-gray-100 bg-white shrink-0">
@@ -748,7 +802,6 @@
                                         </select>
                                     </div>
                                     
-                                    {/* MUNCUL OTOMATIS JIKA STATUS == SUKSES */}
                                     {updateStatusVal === 'SUKSES' && (
                                         <div className="animate-slide-up bg-emerald-50 p-3 rounded-xl border border-emerald-200">
                                             <label className="block text-[10px] font-bold text-emerald-800 mb-1 ml-1">Konfirmasi Metode Bayar</label>
@@ -761,12 +814,13 @@
                                         </div>
                                     )}
 
-                                    <div>
-                                        <label className="block text-[10px] font-bold text-gray-600 mb-1 ml-1">Catatan</label>
-                                        <input type="text" name="keterangan" placeholder="Ketik alasan jika gagal..." className="w-full p-2.5 bg-white border border-gray-200 rounded-xl text-[11px] outline-none focus:border-emerald-500" />
-                                    </div>
+                                    {(updateStatusVal === 'PENDING' || updateStatusVal === 'CANCEL') && (
+                                        <div className="animate-slide-up">
+                                            <label className="block text-[10px] font-bold text-gray-600 mb-1 ml-1">Keterangan / Alasan</label>
+                                            <input type="text" name="keterangan" required placeholder="Wajib diisi..." className="w-full p-2.5 bg-white border border-orange-300 rounded-xl text-[11px] outline-none focus:border-orange-500" />
+                                        </div>
+                                    )}
                                     
-                                    {/* AKSES KAMERA LANGSUNG SIMPAN KE G-DRIVE VIA SERVER */}
                                     <div>
                                         <label className="block text-[10px] font-bold text-gray-600 mb-1 ml-1">Foto Bukti Pengiriman</label>
                                         <div className="border border-dashed border-gray-300 rounded-xl overflow-hidden bg-white">
@@ -787,6 +841,7 @@
                                             )}
                                             <canvas ref={canvasRef} style={{ display: 'none' }}></canvas>
                                         </div>
+                                        {updateStatusVal === 'SUKSES' && !capturedPhoto && <p className="text-[8px] text-red-500 font-bold mt-1 ml-1">*Foto Wajib Jika Sukses</p>}
                                     </div>
                                     <button type="submit" disabled={isLoading} className="w-full bg-gray-900 text-white font-black py-3 rounded-xl shadow-md active:scale-95 text-[11px] uppercase mt-2">Simpan Perubahan</button>
                                 </form>
