@@ -32,7 +32,6 @@
     </style>
 </head>
 <body class="antialiased flex justify-center bg-gray-900">
-    <!-- max-w diubah menjadi ukuran pixel statis agar bingkai tidak ikut menyusut ke tengah -->
     <div id="root" class="w-full max-w-[450px] bg-slate-900 shadow-2xl h-[100dvh] overflow-hidden flex flex-col relative border-x border-slate-800"></div>
 
     <script type="text/babel" data-presets="env,react">
@@ -69,6 +68,7 @@
             const [kurirId, setKurirId] = useState(localStorage.getItem('ex_kurirId') || '');
             const [kurirName, setKurirName] = useState(localStorage.getItem('ex_kurirName') || '');
             const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem('ex_kurirId'));
+            const [isOffline, setIsOffline] = useState(!navigator.onLine);
             
             const [activeTab, setActiveTab] = useState('tugas'); 
             const [tugasViewMode, setTugasViewMode] = useState('standard'); 
@@ -117,7 +117,6 @@
             const [inputJemputEstimasi, setInputJemputEstimasi] = useState('');
             const [showJemputOlshopDropdown, setShowJemputOlshopDropdown] = useState(false);
 
-            // STATE FILTER JEMPUTAN
             const [searchJemput, setSearchJemput] = useState('');
             const [jemputStartDate, setJemputStartDate] = useState('');
             const [jemputEndDate, setJemputEndDate] = useState('');
@@ -128,11 +127,21 @@
             const [capturedPhoto, setCapturedPhoto] = useState(null);
             const [isCameraFullScreen, setIsCameraFullScreen] = useState(false);
 
-            // STATE EDIT ADMIN
             const [isEditAdminModalOpen, setIsEditAdminModalOpen] = useState(false);
             const [editAdminData, setEditAdminData] = useState({ packageId: '', customerName: '', customerPhone: '', olshopName: '' });
 
             const isMasterKurir = kurirId === 'exceedexpress.id@gmail.com';
+
+            useEffect(() => {
+                const handleOnline = () => setIsOffline(false);
+                const handleOffline = () => setIsOffline(true);
+                window.addEventListener('online', handleOnline);
+                window.addEventListener('offline', handleOffline);
+                return () => {
+                    window.removeEventListener('online', handleOnline);
+                    window.removeEventListener('offline', handleOffline);
+                };
+            }, []);
 
             const getLocation = () => {
                 if (navigator.geolocation) {
@@ -146,13 +155,20 @@
             const loadData = async (forceLoginId = null) => {
                 setIsLoading(true); setLoadingMessage('Menyinkronkan Data...');
                 getLocation();
+                const currentId = forceLoginId || kurirId;
+                const cName = forceLoginId === 'exceedexpress.id@gmail.com' ? 'Exceed Express' : kurirName;
+
                 try {
                     const res = await fetch(`${SCRIPT_URL}?action=getInitData&t=${new Date().getTime()}`);
                     const data = await res.json();
                     if(data.status === 'success') {
+                        // SAVE BACKUP KE OFFLINE STORAGE
+                        localStorage.setItem('ex_offline_backup_data', JSON.stringify(data.data));
+                        setIsOffline(false);
+
                         setMasterOlshops(data.data.olshop || []); 
                         setMasterZonas(data.data.zona || []);
-                        const currentId = forceLoginId || kurirId;
+                        
                         if (currentId) {
                             const isMaster = currentId === 'exceedexpress.id@gmail.com';
                             const myPkgs = data.data.packages.filter(p => isMaster || String(p.kurirEmailAsli).toLowerCase() === currentId.toLowerCase() || String(p.kurirId).toLowerCase() === currentId.toLowerCase());
@@ -162,12 +178,37 @@
                                 if (isMaster) return true;
                                 const stat = String(j.status).toLowerCase();
                                 const kId = String(j.kurirId).toLowerCase();
-                                return stat === 'menunggu' || stat.trim() === '' || kId === currentId.toLowerCase() || kId === kurirName.toLowerCase();
+                                return stat === 'menunggu' || stat.trim() === '' || kId === currentId.toLowerCase() || kId === cName.toLowerCase();
                             });
                             setJemputans(myJemputans.reverse());
                         }
                     }
-                } catch(e) { alert("Koneksi terputus. Pastikan internet stabil."); }
+                } catch(e) { 
+                    // JIKA GAGAL KONEKSI, GUNAKAN DATA OFFLINE
+                    setIsOffline(true);
+                    const backupDataStr = localStorage.getItem('ex_offline_backup_data');
+                    if(backupDataStr) {
+                        const backupData = JSON.parse(backupDataStr);
+                        setMasterOlshops(backupData.olshop || []); 
+                        setMasterZonas(backupData.zona || []);
+                        if (currentId) {
+                            const isMaster = currentId === 'exceedexpress.id@gmail.com';
+                            const myPkgs = backupData.packages.filter(p => isMaster || String(p.kurirEmailAsli).toLowerCase() === currentId.toLowerCase() || String(p.kurirId).toLowerCase() === currentId.toLowerCase());
+                            setPackages(myPkgs.reverse());
+
+                            const myJemputans = (backupData.jemputan || []).filter(j => {
+                                if (isMaster) return true;
+                                const stat = String(j.status).toLowerCase();
+                                const kId = String(j.kurirId).toLowerCase();
+                                return stat === 'menunggu' || stat.trim() === '' || kId === currentId.toLowerCase() || kId === cName.toLowerCase();
+                            });
+                            setJemputans(myJemputans.reverse());
+                        }
+                        alert("Anda sedang Offline. Menampilkan data cadangan terakhir.");
+                    } else {
+                        alert("Koneksi terputus dan tidak ada data cadangan."); 
+                    }
+                }
                 setIsLoading(false);
             };
 
@@ -338,6 +379,7 @@
 
             const handleTambahJemput = async (e) => {
                 e.preventDefault();
+                if (isOffline) return alert("Anda sedang offline. Tidak bisa menambah jemputan.");
                 if (!inputJemputOlshop || !inputJemputAddress) return alert("Pilih Olshop dan isi Alamat!");
                 setIsLoading(true); setLoadingMessage('Menambah Jemputan...');
                 try {
@@ -359,6 +401,7 @@
             };
 
             const handleAmbilJemputan = async (idJemput) => {
+                if (isOffline) return alert("Offline. Harap cari sinyal untuk mengambil jemputan.");
                 if(!window.confirm("Ambil tugas jemputan ini?")) return;
                 setIsLoading(true); setLoadingMessage('Mengambil Tugas...');
                 try {
@@ -370,6 +413,7 @@
             };
 
             const handleSelesaiJemputan = async (idJemput) => {
+                if (isOffline) return alert("Offline. Harap cari sinyal untuk selesaikan jemputan.");
                 if(!window.confirm("Tandai jemputan selesai?")) return;
                 setIsLoading(true); setLoadingMessage('Menyelesaikan Tugas...');
                 try {
@@ -389,7 +433,9 @@
             };
 
             const handleUpdateStatus = async (e) => {
-                e.preventDefault(); getLocation();
+                e.preventDefault(); 
+                if (isOffline) return alert("Offline. Harap sambungkan ke internet untuk update status.");
+                getLocation();
                 const nStatus = e.target.status.value; const nKet = e.target.keterangan ? e.target.keterangan.value : ""; const nMetode = e.target.metodeBayarUpdate ? e.target.metodeBayarUpdate.value : "";
 
                 setIsLoading(true); setLoadingMessage('Menyimpan Status...');
@@ -416,6 +462,7 @@
 
             const handleEditAdminSubmit = async (e) => {
                 e.preventDefault();
+                if (isOffline) return alert("Offline. Tidak bisa edit data.");
                 setIsLoading(true); setLoadingMessage('Menyimpan Perubahan...');
                 try {
                     const formData = new URLSearchParams();
@@ -436,7 +483,9 @@
             };
 
             const handleInputBaru = async (e) => {
-                e.preventDefault(); getLocation();
+                e.preventDefault(); 
+                if (isOffline) return alert("Offline. Harap sambungkan ke internet untuk input resi baru.");
+                getLocation();
                 const olshopName = inputOlshopSearch; const customerName = e.target.customerName.value; const address = e.target.address.value;
                 if (!olshopName || !customerName || !address) { alert("Olshop, Customer, dan Alamat wajib!"); return; }
                 const zonaSelect = e.target.ongkirKode; const ongkirAngka = zonaSelect.options[zonaSelect.selectedIndex].getAttribute('data-harga') || 0; const ongkirKodeTeks = zonaSelect.value; 
@@ -585,7 +634,8 @@
 
             if (!isLoggedIn) {
                 return (
-                    <div className="flex h-full items-center justify-center p-6 w-full">
+                    <div className="flex h-full items-center justify-center p-6 w-full relative">
+                        {isOffline && <div className="absolute top-0 w-full bg-red-600 text-white text-center text-[10px] font-bold py-1 z-50">KONEKSI TERPUTUS - OFFLINE MODE</div>}
                         <div className="w-full bg-slate-800 p-8 rounded-3xl border border-slate-700 shadow-2xl relative z-10">
                             <div className="flex justify-center mb-6"><div className="w-20 h-20 bg-blue-500/10 rounded-2xl flex items-center justify-center border border-blue-500/20"><i className="fas fa-motorcycle text-5xl text-blue-500"></i></div></div>
                             <h1 className="text-3xl font-black text-white text-center mb-2 tracking-tight">DRIVER LOGIN</h1>
@@ -610,6 +660,12 @@
 
             return (
                 <React.Fragment>
+                    {isOffline && (
+                        <div className="bg-red-600 text-white text-center text-[10px] font-bold py-1 z-50 absolute top-0 w-full animate-pulse">
+                            KONEKSI TERPUTUS - OFFLINE MODE AKTIF (Tampilkan Data Cadangan)
+                        </div>
+                    )}
+                    
                     {isLoading && (
                         <div className="absolute inset-0 z-[999] bg-slate-900/80 backdrop-blur-sm flex flex-col items-center justify-center">
                             <div className="w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mb-3"></div>
@@ -617,7 +673,7 @@
                         </div>
                     )}
 
-                    <header className="bg-slate-800 pt-8 pb-4 px-5 shadow-md z-20 flex justify-between items-center shrink-0 border-b border-slate-700 rounded-b-3xl">
+                    <header className={`bg-slate-800 pb-4 px-5 shadow-md z-20 flex justify-between items-center shrink-0 border-b border-slate-700 rounded-b-3xl ${isOffline ? 'pt-10' : 'pt-8'}`}>
                         <div>
                             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Exceed Express</p>
                             <h1 className="text-xl font-black text-white leading-tight truncate w-40">{kurirName}</h1>
