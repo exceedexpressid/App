@@ -196,8 +196,12 @@
                 }
             };
 
+            // PERBAIKAN: Gunakan .replace('_', ' ') agar pembacaan Siap Antar tidak error
             const tugasAktif = useMemo(() => {
-                let aktif = packages.filter(p => { const s = String(p.status).toUpperCase(); return s === 'PROSES' || s === 'SIAP_ANTAR' || s === 'PENDING'; });
+                let aktif = packages.filter(p => { 
+                    const s = String(p.status).toUpperCase().replace('_', ' '); 
+                    return s === 'PROSES' || s === 'SIAP ANTAR' || s === 'PENDING'; 
+                });
                 if(searchQuery) {
                     const q = searchQuery.toLowerCase();
                     aktif = aktif.filter(p => 
@@ -220,7 +224,10 @@
 
             useEffect(() => {
                 if (activeTab === 'rute') {
-                    const rItems = packages.filter(p => { const s = String(p.status).toUpperCase(); return s === 'PROSES' || s === 'SIAP_ANTAR' || s === 'PENDING'; });
+                    const rItems = packages.filter(p => { 
+                        const s = String(p.status).toUpperCase().replace('_', ' '); 
+                        return s === 'PROSES' || s === 'SIAP ANTAR' || s === 'PENDING'; 
+                    });
                     rItems.sort((a, b) => {
                         const posA = routeOrder.indexOf(a.packageId) !== -1 ? routeOrder.indexOf(a.packageId) : 99999;
                         const posB = routeOrder.indexOf(b.packageId) !== -1 ? routeOrder.indexOf(b.packageId) : 99999;
@@ -242,27 +249,53 @@
             };
 
             const startCamera = async () => { 
-                try { const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }); setCameraStream(stream); setIsCameraFullScreen(true); } 
-                catch (err) { alert("Izin kamera ditolak."); } 
+                try { 
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }); 
+                    setCameraStream(stream); 
+                    setIsCameraFullScreen(true); 
+                } 
+                catch (err) { alert("Izin kamera ditolak. Pastikan izinkan akses kamera di pengaturan browser."); } 
             };
-            const stopCamera = () => { if (cameraStream) { cameraStream.getTracks().forEach(track => track.stop()); setCameraStream(null); } setIsCameraFullScreen(false); };
+            const stopCamera = () => { 
+                if (cameraStream) { 
+                    cameraStream.getTracks().forEach(track => track.stop()); 
+                    setCameraStream(null); 
+                } 
+                setIsCameraFullScreen(false); 
+            };
             const takePhoto = () => { 
                 if (videoRef.current && canvasRef.current) { 
-                    const video = videoRef.current; const canvas = canvasRef.current; canvas.width = video.videoWidth; canvas.height = video.videoHeight; canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height); 
-                    const dataUrl = canvas.toDataURL('image/jpeg', 0.6); setCapturedPhoto(dataUrl); stopCamera(); 
+                    const video = videoRef.current; const canvas = canvasRef.current; 
+                    canvas.width = video.videoWidth; canvas.height = video.videoHeight; 
+                    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height); 
+                    const dataUrl = canvas.toDataURL('image/jpeg', 0.6); 
+                    setCapturedPhoto(dataUrl); 
+                    stopCamera(); 
+                    // Auto save ke galeri
                     try {
-                        const link = document.createElement('a'); link.href = dataUrl; link.download = `Paket_${new Date().getTime()}.jpg`; document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                        const link = document.createElement('a'); 
+                        link.href = dataUrl; 
+                        link.download = `Paket_${new Date().getTime()}.jpg`; 
+                        document.body.appendChild(link); 
+                        link.click(); 
+                        document.body.removeChild(link);
                     } catch(e) {}
                 } 
             };
             const retakePhoto = () => { setCapturedPhoto(null); startCamera(); };
 
-            useEffect(() => { if (activeTab !== 'input' && isCameraFullScreen) stopCamera(); }, [activeTab, isCameraFullScreen]);
-            useEffect(() => {
-                if (isCameraFullScreen && cameraStream && videoRef.current) {
-                    videoRef.current.srcObject = cameraStream; videoRef.current.setAttribute('playsinline', true); videoRef.current.muted = true; videoRef.current.play().catch(e => console.error(e));
+            // PERBAIKAN: Fungsi cerdas untuk menghubungkan stream ke tag video agar tidak nge-blank
+            const videoCallbackRef = (node) => {
+                videoRef.current = node;
+                if (node && cameraStream) {
+                    node.srcObject = cameraStream;
+                    node.setAttribute('playsinline', true);
+                    node.muted = true;
+                    node.play().catch(e => console.error("Kamera ditahan browser:", e));
                 }
-            }, [isCameraFullScreen, cameraStream]);
+            };
+
+            useEffect(() => { if (activeTab !== 'input' && isCameraFullScreen) stopCamera(); }, [activeTab, isCameraFullScreen]);
 
             const handleTambahJemput = async (e) => {
                 e.preventDefault();
@@ -309,7 +342,11 @@
             };
 
             const openUpdateModal = (pkg, e) => {
-                e.stopPropagation(); setSelectedPkg(pkg); setUpdateStatusVal(String(pkg.status).toUpperCase() === 'PROSES' || String(pkg.status).toUpperCase() === 'SIAP_ANTAR' ? 'SUKSES' : String(pkg.status).toUpperCase()); setIsModalOpen(true);
+                e.stopPropagation(); 
+                setSelectedPkg(pkg); 
+                const stat = String(pkg.status).toUpperCase().replace('_', ' ');
+                setUpdateStatusVal(stat === 'PROSES' || stat === 'SIAP ANTAR' ? 'SUKSES' : stat); 
+                setIsModalOpen(true);
             };
 
             const handleUpdateStatus = async (e) => {
@@ -357,10 +394,10 @@
 
             const historiPkgs = useMemo(() => {
                 let hPkgs = packages.filter(p => {
-                    const s = String(p.status).toUpperCase();
+                    const s = String(p.status).toUpperCase().replace('_', ' ');
                     if (historiStatusFilter === 'semua') return s === 'SUKSES' || s === 'CANCEL' || s === 'BATAL' || s === 'PENDING';
                     if (historiStatusFilter === 'cancel') return s === 'CANCEL' || s === 'BATAL';
-                    return s === historiStatusFilter.toUpperCase();
+                    return s === historiStatusFilter.toUpperCase().replace('_', ' ');
                 });
                 if (historiStartDate || historiEndDate) {
                    hPkgs = hPkgs.filter(p => {
@@ -411,7 +448,7 @@
                 let groups = {};
                 
                 filteredByDate.forEach(pkg => {
-                    const stat = String(pkg.status).toUpperCase();
+                    const stat = String(pkg.status).toUpperCase().replace('_', ' ');
                     if (stat === 'SUKSES') r_sukses++;
                     else if (stat === 'PENDING') r_pending++;
                     else if (stat === 'CANCEL' || stat === 'BATAL') r_cancel++;
@@ -460,7 +497,7 @@
                 if (normalizedDateStr >= sD && normalizedDateStr <= eD) validSaldo = true;
 
                 if (validSaldo) {
-                    const stat = String(pkg.status).toUpperCase();
+                    const stat = String(pkg.status).toUpperCase().replace('_', ' ');
                     if (stat === 'SUKSES') s_sukses++;
                     else if (stat === 'PENDING') s_pending++;
                     else if (stat === 'CANCEL' || stat === 'BATAL') s_cancel++;
@@ -549,7 +586,8 @@
                                 ) : (
                                     <div className={`space-y-${tugasViewMode === 'standard' ? '3' : '2'}`}>
                                         {tugasAktif.map((pkg, i) => {
-                                            const isPending = String(pkg.status).toUpperCase() === 'PENDING';
+                                            const stat = String(pkg.status).toUpperCase().replace('_', ' ');
+                                            const isPending = stat === 'PENDING';
                                             const waMsg = `Halo kaka, saya kurir dari Exceed express, mau konfirmasi sekaligus antar paket dari Toko/Olshop ${pkg.olshopName}, dengan tagihan COD sebesar ${formatCurr(pkg.totalTagihan)}. Saat ini saya sedang mengantar paket lain sesuai rute. Terima kasih`;
                                             const waLink = pkg.customerPhone ? `https://wa.me/${formatWA(pkg.customerPhone)}?text=${encodeURIComponent(waMsg)}` : null;
 
@@ -857,7 +895,7 @@
                                     {historiPkgs.length === 0 ? (
                                         <div className="text-center py-12 bg-slate-800/50 rounded-3xl border border-dashed border-slate-700"><p className="text-xs text-slate-500 font-bold uppercase tracking-widest">Tidak ada riwayat.</p></div>
                                     ) : historiPkgs.map((pkg, i) => {
-                                        const stat = String(pkg.status).toUpperCase();
+                                        const stat = String(pkg.status).toUpperCase().replace('_', ' ');
                                         let bgBadge = 'bg-slate-800 text-slate-400 border-slate-700';
                                         if (stat === 'SUKSES') bgBadge = 'bg-emerald-900/30 text-emerald-400 border-emerald-800/50';
                                         if (stat === 'PENDING') bgBadge = 'bg-orange-900/30 text-orange-400 border-orange-800/50';
@@ -871,7 +909,7 @@
                                                     <p className="text-[9px] text-slate-500 truncate font-mono">{pkg.packageId} • <span className="text-orange-400/80 font-sans font-bold">{pkg.olshopName}</span></p>
                                                 </div>
                                                 <div className="flex flex-col items-end shrink-0 pl-2">
-                                                    <span className={`text-[8px] font-bold px-2.5 py-1 rounded uppercase tracking-widest border ${bgBadge}`}>{stat === 'SIAP_ANTAR' || stat === 'PROSES' ? 'PROSES' : stat}</span>
+                                                    <span className={`text-[8px] font-bold px-2.5 py-1 rounded uppercase tracking-widest border ${bgBadge}`}>{stat === 'SIAP ANTAR' || stat === 'PROSES' ? 'PROSES' : stat}</span>
                                                     <span className="text-sm font-black text-blue-400 mt-1.5">{formatCurr(pkg.totalTagihan)}</span>
                                                 </div>
                                             </div>
@@ -1025,8 +1063,8 @@
                                         </div>
                                     </div>
                                     <div className="mt-4 text-center">
-                                        <span className={`text-[9px] font-bold px-3 py-1.5 rounded uppercase tracking-widest border ${String(detailPkg.status).toUpperCase() === 'SUKSES' ? 'bg-emerald-900/30 text-emerald-400 border-emerald-800/50' : (String(detailPkg.status).toUpperCase() === 'PENDING' ? 'bg-orange-900/30 text-orange-400 border-orange-800/50' : 'bg-red-900/30 text-red-400 border-red-800/50')}`}>
-                                            STATUS: {String(detailPkg.status).toUpperCase() === 'SIAP_ANTAR' ? 'PROSES' : String(detailPkg.status).toUpperCase()}
+                                        <span className={`text-[9px] font-bold px-3 py-1.5 rounded uppercase tracking-widest border ${String(detailPkg.status).toUpperCase().replace('_', ' ') === 'SUKSES' ? 'bg-emerald-900/30 text-emerald-400 border-emerald-800/50' : (String(detailPkg.status).toUpperCase().replace('_', ' ') === 'PENDING' ? 'bg-orange-900/30 text-orange-400 border-orange-800/50' : 'bg-red-900/30 text-red-400 border-red-800/50')}`}>
+                                            STATUS: {String(detailPkg.status).toUpperCase().replace('_', ' ') === 'SIAP ANTAR' ? 'PROSES' : String(detailPkg.status).toUpperCase().replace('_', ' ')}
                                         </span>
                                     </div>
                                 </div>
@@ -1053,7 +1091,7 @@
                                             <label className="block text-[11px] font-bold text-slate-400 mb-2 ml-1 uppercase tracking-widest">Status Final</label>
                                             <select name="status" value={updateStatusVal} onChange={(e) => setUpdateStatusVal(e.target.value)} className="w-full p-4 bg-slate-800 border border-slate-700 rounded-2xl text-sm font-black text-white outline-none focus:border-blue-500 shadow-sm appearance-none transition-colors">
                                                 <option value="SUKSES">✅ SUKSES (Terkirim)</option>
-                                                <option value="SIAP_ANTAR">🚚 PROSES (Siap Antar)</option>
+                                                <option value="Siap Antar">🚚 PROSES (Siap Antar)</option>
                                                 <option value="PENDING">⏱️ PENDING (Ditunda)</option>
                                                 <option value="CANCEL">❌ CANCEL (Batal)</option>
                                             </select>
@@ -1083,6 +1121,40 @@
                                     </form>
                                 </div>
                             </div>
+                        </div>
+                    )}
+
+                    {/* MODAL KAMERA FULL SCREEN APPSHEET STYLE */}
+                    {isCameraFullScreen && (
+                        <div className="fixed inset-0 z-[9999] bg-black flex flex-col animate-slide-up">
+                            <div className="absolute top-0 w-full p-4 flex justify-between items-center z-10 bg-gradient-to-b from-black/80 to-transparent">
+                                <span className="text-white font-bold text-sm drop-shadow-md">Ambil Foto Gambar Paket</span>
+                                <button type="button" onClick={stopCamera} className="text-white w-8 h-8 flex items-center justify-center bg-black/40 rounded-full border border-white/20">
+                                    <i className="fas fa-times"></i>
+                                </button>
+                            </div>
+                            
+                            <div className="flex-1 relative bg-black flex items-center justify-center overflow-hidden">
+                                <video ref={videoCallbackRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover"></video>
+                                <div className="absolute inset-0 border-[1px] border-white/20 pointer-events-none grid grid-cols-3 grid-rows-3">
+                                    <div className="border-r border-b border-white/20"></div>
+                                    <div className="border-b border-white/20"></div>
+                                    <div className="border-l border-b border-white/20"></div>
+                                    <div className="border-r border-b border-white/20"></div>
+                                    <div className="border-b border-white/20"></div>
+                                    <div className="border-l border-b border-white/20"></div>
+                                    <div className="border-r border-white/20"></div>
+                                    <div></div>
+                                    <div className="border-l border-white/20"></div>
+                                </div>
+                            </div>
+                            
+                            <div className="h-32 bg-black flex items-center justify-center w-full z-10 pb-4 shrink-0 border-t border-white/10">
+                                <button type="button" onClick={takePhoto} className="w-16 h-16 bg-white rounded-full flex items-center justify-center border-4 border-gray-400 active:scale-95 transition-transform">
+                                    <div className="w-14 h-14 rounded-full border-2 border-black"></div>
+                                </button>
+                            </div>
+                            <canvas ref={canvasRef} style={{ display: 'none' }}></canvas>
                         </div>
                     )}
 
