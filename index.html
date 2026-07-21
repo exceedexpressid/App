@@ -20,6 +20,9 @@
     <script src="https://unpkg.com/@babel/standalone@7.22.20/babel.min.js"></script>
 
     <style>
+        /* MENGECILKAN SELURUH TAMPILAN SEBESAR 25% SECARA PROPORSIONAL */
+        html { font-size: 12px; } 
+
         body { background-color: #0f172a; color: #f1f5f9; font-family: 'Segoe UI', system-ui, sans-serif; touch-action: manipulation; }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .glass { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); }
@@ -29,7 +32,8 @@
     </style>
 </head>
 <body class="antialiased flex justify-center bg-gray-900">
-    <div id="root" class="w-full max-w-md bg-slate-900 shadow-2xl h-[100dvh] overflow-hidden flex flex-col relative border-x border-slate-800"></div>
+    <!-- max-w diubah menjadi ukuran pixel statis agar bingkai tidak ikut menyusut ke tengah -->
+    <div id="root" class="w-full max-w-[450px] bg-slate-900 shadow-2xl h-[100dvh] overflow-hidden flex flex-col relative border-x border-slate-800"></div>
 
     <script type="text/babel" data-presets="env,react">
         /** @jsx React.createElement */
@@ -113,12 +117,18 @@
             const [inputJemputEstimasi, setInputJemputEstimasi] = useState('');
             const [showJemputOlshopDropdown, setShowJemputOlshopDropdown] = useState(false);
 
+            // STATE FILTER JEMPUTAN
+            const [searchJemput, setSearchJemput] = useState('');
+            const [jemputStartDate, setJemputStartDate] = useState('');
+            const [jemputEndDate, setJemputEndDate] = useState('');
+
             const [cameraStream, setCameraStream] = useState(null);
             const videoRef = useRef(null);
             const canvasRef = useRef(null);
             const [capturedPhoto, setCapturedPhoto] = useState(null);
             const [isCameraFullScreen, setIsCameraFullScreen] = useState(false);
 
+            // STATE EDIT ADMIN
             const [isEditAdminModalOpen, setIsEditAdminModalOpen] = useState(false);
             const [editAdminData, setEditAdminData] = useState({ packageId: '', customerName: '', customerPhone: '', olshopName: '' });
 
@@ -148,7 +158,12 @@
                             const myPkgs = data.data.packages.filter(p => isMaster || String(p.kurirEmailAsli).toLowerCase() === currentId.toLowerCase() || String(p.kurirId).toLowerCase() === currentId.toLowerCase());
                             setPackages(myPkgs.reverse());
 
-                            const myJemputans = (data.data.jemputan || []).filter(j => isMaster || String(j.status).toLowerCase() === 'menunggu' || String(j.status).trim() === '' || String(j.kurirId).toLowerCase() === currentId.toLowerCase() || String(j.kurirNama).toLowerCase() === kurirName.toLowerCase());
+                            const myJemputans = (data.data.jemputan || []).filter(j => {
+                                if (isMaster) return true;
+                                const stat = String(j.status).toLowerCase();
+                                const kId = String(j.kurirId).toLowerCase();
+                                return stat === 'menunggu' || stat.trim() === '' || kId === currentId.toLowerCase() || kId === kurirName.toLowerCase();
+                            });
                             setJemputans(myJemputans.reverse());
                         }
                     }
@@ -214,6 +229,39 @@
                     return posA - posB;
                 });
             }, [packages, routeOrder, searchQuery]);
+
+            const filteredJemputans = useMemo(() => {
+                let list = jemputans;
+                if (searchJemput) {
+                    const q = searchJemput.toLowerCase();
+                    list = list.filter(j => 
+                        String(j.olshopName).toLowerCase().includes(q) || 
+                        String(j.address).toLowerCase().includes(q) ||
+                        String(j.kurirId).toLowerCase().includes(q)
+                    );
+                }
+                if (jemputStartDate || jemputEndDate) {
+                    list = list.filter(j => {
+                        let pDateStr = j.tanggal || j.dateString || '';
+                        if (!pDateStr) return true;
+                        let normalizedDateStr = "";
+                        try {
+                            let d = new Date(pDateStr);
+                            if (!isNaN(d.getTime())) {
+                                normalizedDateStr = d.toISOString().split('T')[0];
+                            } else {
+                                normalizedDateStr = pDateStr.split('T')[0];
+                            }
+                        } catch(e) {
+                            normalizedDateStr = pDateStr.split('T')[0];
+                        }
+                        const sD = jemputStartDate || "2000-01-01";
+                        const eD = jemputEndDate || "2100-01-01";
+                        return normalizedDateStr >= sD && normalizedDateStr <= eD;
+                    });
+                }
+                return list;
+            }, [jemputans, searchJemput, jemputStartDate, jemputEndDate]);
 
             useEffect(() => {
                 if (activeTab === 'rute') {
@@ -612,10 +660,16 @@
                                             const isPending = stat === 'PENDING';
                                             const waMsg = `Halo kaka, saya kurir dari Exceed express, mau konfirmasi sekaligus antar paket dari Toko/Olshop ${pkg.olshopName}, dengan tagihan COD sebesar ${formatCurr(pkg.totalTagihan)}. Saat ini saya sedang mengantar paket lain sesuai rute. Terima kasih`;
                                             const waLink = pkg.customerPhone ? `https://wa.me/${formatWA(pkg.customerPhone)}?text=${encodeURIComponent(waMsg)}` : null;
+                                            const resolvedUrlFoto = getFotoUrl(pkg.fotoBukti);
 
                                             if (tugasViewMode === 'compact') {
                                                 return (
                                                     <div key={i} onClick={() => setDetailPkg(pkg)} className={`bg-slate-800 border ${isPending ? 'border-orange-500/50 bg-orange-900/10' : 'border-slate-700'} rounded-2xl p-3 shadow-lg flex items-center gap-2 relative overflow-hidden cursor-pointer active:scale-[0.98] transition-transform`}>
+                                                        {resolvedUrlFoto ? (
+                                                            <img src={resolvedUrlFoto} className="w-12 h-12 rounded-lg object-cover border border-slate-700 shrink-0" onClick={(e) => { e.stopPropagation(); setDetailPkg(pkg); }} />
+                                                        ) : (
+                                                            <div className="w-12 h-12 rounded-lg bg-slate-900 border border-dashed border-slate-700 flex items-center justify-center shrink-0"><i className="fas fa-image text-slate-600 text-xs"></i></div>
+                                                        )}
                                                         <div className="flex-1 min-w-0">
                                                             <div className="flex items-center gap-1.5 mb-1">
                                                                 <span className="font-bold text-xs text-white truncate">{pkg.customerName}</span>
@@ -646,10 +700,17 @@
                                                     </div>
 
                                                     <h3 className="font-black text-white text-lg leading-tight mb-2 truncate pr-2">{pkg.customerName}</h3>
-                                                    <div className="space-y-1.5 mb-4">
-                                                        <p className="text-[11px] text-slate-300 flex items-center font-medium"><i className="fas fa-store text-orange-400 mr-2 w-4 text-center"></i>{pkg.olshopName}</p>
-                                                        {pkg.customerPhone && <p className="text-[11px] text-slate-300 flex items-center font-medium"><i className="fas fa-phone text-emerald-400 mr-2 w-4 text-center"></i>{pkg.customerPhone}</p>}
-                                                        <p className="text-[11px] text-slate-400 flex items-start leading-snug"><i className="fas fa-map-marker-alt text-blue-400 mr-2 mt-0.5 w-4 text-center shrink-0"></i><span className="line-clamp-2">{pkg.address}</span></p>
+                                                    <div className="flex gap-3 mb-4 items-start">
+                                                        {resolvedUrlFoto ? (
+                                                            <img src={resolvedUrlFoto} className="w-16 h-16 rounded-xl object-cover border border-slate-700 shrink-0" onClick={(e) => { e.stopPropagation(); setDetailPkg(pkg); }} />
+                                                        ) : (
+                                                            <div className="w-16 h-16 rounded-xl bg-slate-900 border border-dashed border-slate-700 flex items-center justify-center shrink-0"><i className="fas fa-image text-slate-600 text-lg"></i></div>
+                                                        )}
+                                                        <div className="space-y-1.5 flex-1 min-w-0">
+                                                            <p className="text-[11px] text-slate-300 flex items-center font-medium"><i className="fas fa-store text-orange-400 mr-2 w-4 text-center"></i>{pkg.olshopName}</p>
+                                                            {pkg.customerPhone && <p className="text-[11px] text-slate-300 flex items-center font-medium"><i className="fas fa-phone text-emerald-400 mr-2 w-4 text-center"></i>{pkg.customerPhone}</p>}
+                                                            <p className="text-[11px] text-slate-400 flex items-start leading-snug"><i className="fas fa-map-marker-alt text-blue-400 mr-2 mt-0.5 w-4 text-center shrink-0"></i><span className="line-clamp-2">{pkg.address}</span></p>
+                                                        </div>
                                                     </div>
                                                     
                                                     <div className="flex justify-between items-end pt-3 border-t border-slate-700">
@@ -717,11 +778,27 @@
                                     </form>
                                 )}
 
-                                {jemputans.length === 0 ? (
+                                <div className="mb-3 relative">
+                                    <i className="fas fa-search absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-500 text-sm"></i>
+                                    <input type="text" placeholder="Cari nama olshop, alamat, kurir..." value={searchJemput} onChange={(e) => setSearchJemput(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-xs outline-none focus:border-blue-500 text-white placeholder-slate-500 transition-colors shadow-sm" />
+                                </div>
+                                <div className="bg-slate-800 p-3 rounded-xl shadow-sm border border-slate-700 mb-4 flex items-center gap-2">
+                                    <div className="flex-1 relative">
+                                        <i className="far fa-calendar-alt absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 text-[10px]"></i>
+                                        <input type="date" value={jemputStartDate} onChange={e=>setJemputStartDate(e.target.value)} className="w-full pl-8 pr-2 py-2 bg-slate-900 border border-slate-600 rounded-lg text-[10px] outline-none focus:border-blue-500 text-slate-300 font-bold" />
+                                    </div>
+                                    <span className="text-[10px] font-bold text-slate-500">s/d</span>
+                                    <div className="flex-1 relative">
+                                        <i className="far fa-calendar-alt absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 text-[10px]"></i>
+                                        <input type="date" value={jemputEndDate} onChange={e=>setJemputEndDate(e.target.value)} className="w-full pl-8 pr-2 py-2 bg-slate-900 border border-slate-600 rounded-lg text-[10px] outline-none focus:border-blue-500 text-slate-300 font-bold" />
+                                    </div>
+                                </div>
+
+                                {filteredJemputans.length === 0 ? (
                                     <div className="text-center py-12 text-slate-500 bg-slate-800/50 rounded-3xl border border-dashed border-slate-700"><p className="text-xs font-bold">Belum ada request jemputan.</p></div>
                                 ) : (
                                     <div className="space-y-3">
-                                        {jemputans.map((jpt, i) => {
+                                        {filteredJemputans.map((jpt, i) => {
                                             const isMenunggu = String(jpt.status).toLowerCase() === 'menunggu' || !jpt.status;
                                             const isSelesai = String(jpt.status).toLowerCase() === 'selesai';
                                             const isMilikSaya = String(jpt.kurirId).toLowerCase() === kurirName.toLowerCase() || String(jpt.kurirId).toLowerCase() === kurirId.toLowerCase();
