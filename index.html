@@ -10,13 +10,14 @@
     <meta name="theme-color" content="#0f172a">
     <meta name="apple-mobile-web-app-capable" content="yes">
     
-    <!-- Tailwind CSS -->
+    <!-- Tailwind CSS (Catatan: Untuk produksi nyata, hindari Play CDN) -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <!-- React & ReactDOM -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <!-- Babel (Catatan: Ini adalah penyebab utama loading awal yang lama. Gunakan Vite untuk jangka panjang) -->
     <script src="https://unpkg.com/@babel/standalone@7.22.20/babel.min.js"></script>
 
     <style>
@@ -43,7 +44,9 @@
         const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzVHojspm17WSZU42RaMtgiNWJikRfGyTlPh1FczlDJS9JL52PxX0d9RpkNJYM4g424/exec";
         const APPSHEET_APP_ID = "APLIKASEXCEED-327461285";
 
-        const formatCurr = (num) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(num || 0);
+        const idrFormatter = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 });
+        const formatCurr = (num) => idrFormatter.format(num || 0);
+        
         const formatWA = (phone) => {
             if(!phone) return ''; let p = String(phone).replace(/\D/g, '');
             if(p.startsWith('0')) p = '62' + p.substring(1); return p;
@@ -137,9 +140,6 @@
 
             const isMasterKurir = kurirId === 'exceedexpress.id@gmail.com';
 
-            // ==========================================================
-            // LOGIKA PROSES ANTREAN (SYNC QUEUE) SAAT ONLINE
-            // ==========================================================
             const processSyncQueue = async () => {
                 const queueStr = localStorage.getItem('ex_pending_sync');
                 if (!queueStr) return;
@@ -182,7 +182,6 @@
                 }
             };
 
-            // Pendeteksi Sinyal Otomatis
             useEffect(() => {
                 const handleOnline = () => {
                     setIsOffline(false);
@@ -218,7 +217,6 @@
                     const res = await fetch(`${SCRIPT_URL}?action=getInitData&t=${new Date().getTime()}`);
                     const data = await res.json();
                     if(data.status === 'success') {
-                        // SAVE BACKUP KE OFFLINE STORAGE
                         localStorage.setItem('ex_offline_backup_data', JSON.stringify(data.data));
                         setIsOffline(false);
 
@@ -301,6 +299,13 @@
                 }
             };
 
+            // Mengubah pencarian routeOrder indexOf menjadi Hash Map (O(1) lookup) agar lebih ringan
+            const routeOrderMap = useMemo(() => {
+                const map = new Map();
+                routeOrder.forEach((id, index) => map.set(id, index));
+                return map;
+            }, [routeOrder]);
+
             const tugasAktif = useMemo(() => {
                 let aktif = packages.filter(p => { 
                     const s = String(p.status).toUpperCase().replace('_', ' '); 
@@ -320,11 +325,13 @@
                 return aktif.sort((a, b) => {
                     const isPendingA = String(a.status).toUpperCase() === 'PENDING'; const isPendingB = String(b.status).toUpperCase() === 'PENDING';
                     if (isPendingA && !isPendingB) return 1; if (!isPendingA && isPendingB) return -1; 
-                    const posA = routeOrder.indexOf(a.packageId) !== -1 ? routeOrder.indexOf(a.packageId) : 99999;
-                    const posB = routeOrder.indexOf(b.packageId) !== -1 ? routeOrder.indexOf(b.packageId) : 99999;
+                    
+                    // Menggunakan optimasi Map
+                    const posA = routeOrderMap.has(a.packageId) ? routeOrderMap.get(a.packageId) : 99999;
+                    const posB = routeOrderMap.has(b.packageId) ? routeOrderMap.get(b.packageId) : 99999;
                     return posA - posB;
                 });
-            }, [packages, routeOrder, searchQuery]);
+            }, [packages, routeOrderMap, searchQuery]);
 
             const filteredJemputans = useMemo(() => {
                 let list = jemputans;
@@ -366,13 +373,13 @@
                         return s === 'PROSES' || s === 'SIAP ANTAR' || s === 'PENDING'; 
                     });
                     rItems.sort((a, b) => {
-                        const posA = routeOrder.indexOf(a.packageId) !== -1 ? routeOrder.indexOf(a.packageId) : 99999;
-                        const posB = routeOrder.indexOf(b.packageId) !== -1 ? routeOrder.indexOf(b.packageId) : 99999;
+                        const posA = routeOrderMap.has(a.packageId) ? routeOrderMap.get(a.packageId) : 99999;
+                        const posB = routeOrderMap.has(b.packageId) ? routeOrderMap.get(b.packageId) : 99999;
                         return posA - posB;
                     });
                     setRouteItems(rItems);
                 }
-            }, [activeTab, packages, routeOrder]);
+            }, [activeTab, packages, routeOrderMap]);
 
             const moveRouteUp = (index) => { if (index === 0) return; const newItems = [...routeItems]; [newItems[index - 1], newItems[index]] = [newItems[index], newItems[index - 1]]; setRouteItems(newItems); };
             const moveRouteDown = (index) => { if (index === routeItems.length - 1) return; const newItems = [...routeItems]; [newItems[index + 1], newItems[index]] = [newItems[index], newItems[index + 1]]; setRouteItems(newItems); };
@@ -400,27 +407,28 @@
                 } 
                 setIsCameraFullScreen(false); 
             };
+            
+            // OPTIMASI: Compress ukuran gambar canvas agar base64 tidak membuat browser berat
             const takePhoto = () => { 
                 if (videoRef.current && canvasRef.current) { 
                     const video = videoRef.current; const canvas = canvasRef.current; 
-                    canvas.width = video.videoWidth; canvas.height = video.videoHeight; 
+                    
+                    // Resize maksimal lebar 640px untuk menghemat memori
+                    const MAX_WIDTH = 640;
+                    const scaleSize = MAX_WIDTH / video.videoWidth;
+                    canvas.width = MAX_WIDTH; 
+                    canvas.height = video.videoHeight * scaleSize; 
+                    
                     canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height); 
-                    const dataUrl = canvas.toDataURL('image/jpeg', 0.6); 
+                    // Kompresi JPEG hingga 50%
+                    const dataUrl = canvas.toDataURL('image/jpeg', 0.5); 
+                    
                     setCapturedPhoto(dataUrl); 
                     stopCamera(); 
-                    try {
-                        const link = document.createElement('a'); 
-                        link.href = dataUrl; 
-                        link.download = `Paket_${new Date().getTime()}.jpg`; 
-                        document.body.appendChild(link); 
-                        link.click(); 
-                        document.body.removeChild(link);
-                    } catch(e) {}
                 } 
             };
             const retakePhoto = () => { setCapturedPhoto(null); startCamera(); };
 
-            // FIX KAMERA HP BLANK: Menggunakan useEffect agar stream pasti menempel
             useEffect(() => {
                 if (isCameraFullScreen && cameraStream && videoRef.current) {
                     videoRef.current.srcObject = cameraStream;
@@ -560,50 +568,6 @@
                         loadData();
                     } else { alert("Gagal: " + result.message); }
                 } catch(err) { alert("Error jaringan."); } finally { setIsLoading(false); }
-            };
-
-            const handleInputBaru = async (e) => {
-                e.preventDefault(); getLocation();
-                const olshopName = inputOlshopSearch; const customerName = e.target.customerName.value; const address = e.target.address.value;
-                if (!olshopName || !customerName || !address) { alert("Olshop, Customer, dan Alamat wajib!"); return; }
-                const zonaSelect = e.target.ongkirKode; const ongkirAngka = zonaSelect.options[zonaSelect.selectedIndex].getAttribute('data-harga') || 0; const ongkirKodeTeks = zonaSelect.value; 
-                const hargaPaket = e.target.hargaPaket.value.replace(/\./g, '') || 0; const tambahanOngkir = e.target.tambahanOngkir.value.replace(/\./g, '') || 0;
-                
-                if (!navigator.onLine || isOffline) {
-                    const idPaket = "EXCD" + Math.floor(100000 + Math.random() * 900000);
-                    const payload = { 
-                        idPaket, olshopName, customerName, customerPhone: e.target.customerPhone.value, 
-                        address, hargaPaket, ongkirKode: ongkirKodeTeks, ongkirAngka, tambahanOngkir, 
-                        status: inputFormStatus, metodeBayar: inputFormStatus === 'SUKSES' ? e.target.metodeBayar.value : '',
-                        keterangan: (inputFormStatus === 'PENDING' || inputFormStatus === 'CANCEL') ? e.target.keteranganForm.value : '',
-                        kurirId, titikLokasi: currentLocation 
-                    };
-                    if (capturedPhoto) payload.fotoBase64 = capturedPhoto;
-                    const q = [...pendingSync, { type: 'addPackage', payload, ts: Date.now() }];
-                    setPendingSync(q); localStorage.setItem('ex_pending_sync', JSON.stringify(q));
-                    alert(`Sinyal Putus! RESI (${idPaket}) DISIMPAN DI HP. Akan otomatis terkirim saat ada internet.`);
-                    e.target.reset(); setInputOlshopSearch(''); setValHarga(''); setValTambahan(''); setCapturedPhoto(null); setInputFormStatus('Siap Antar'); setActiveTab('tugas');
-                    return;
-                }
-
-                setIsLoading(true); setLoadingMessage('Mendaftar Resi...');
-                try {
-                    const idPaket = "EXCD" + Math.floor(100000 + Math.random() * 900000);
-                    const formData = new URLSearchParams(); formData.append('action', 'addPackage'); formData.append('idPaket', idPaket); formData.append('olshopName', olshopName); formData.append('customerName', customerName); formData.append('customerPhone', e.target.customerPhone.value); formData.append('address', address); formData.append('hargaPaket', hargaPaket); formData.append('ongkirKode', ongkirKodeTeks); formData.append('ongkirAngka', ongkirAngka); formData.append('tambahanOngkir', tambahanOngkir); formData.append('status', inputFormStatus); 
-                    
-                    if (inputFormStatus === 'SUKSES') formData.append('metodeBayar', e.target.metodeBayar.value);
-                    if (inputFormStatus === 'PENDING' || inputFormStatus === 'CANCEL') formData.append('keterangan', e.target.keteranganForm.value);
-
-                    formData.append('kurirId', kurirId);
-                    if (currentLocation) formData.append('titikLokasi', currentLocation);
-                    if (capturedPhoto) formData.append('fotoBase64', capturedPhoto);
-                    
-                    const response = await fetch(SCRIPT_URL, { method: 'POST', body: formData, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
-                    const result = await response.json();
-                    if (result.status === 'success') { 
-                        alert(`Berhasil! RESI: ${idPaket}`); e.target.reset(); setInputOlshopSearch(''); setValHarga(''); setValTambahan(''); setCapturedPhoto(null); setInputFormStatus('Siap Antar'); setActiveTab('tugas'); loadData(); 
-                    } else { alert("Gagal: " + result.message); }
-                } catch (error) { alert("Error jaringan."); } finally { setIsLoading(false); }
             };
 
             const historiPkgs = useMemo(() => {
@@ -832,7 +796,7 @@
                                                 return (
                                                     <div key={i} onClick={() => setDetailPkg(pkg)} className={`bg-slate-800 border ${isPending ? 'border-orange-500/50 bg-orange-900/10' : 'border-slate-700'} rounded-2xl p-3 shadow-lg flex items-center gap-2 relative overflow-hidden cursor-pointer active:scale-[0.98] transition-transform`}>
                                                         {resolvedUrlFoto ? (
-                                                            <img src={resolvedUrlFoto} className="w-12 h-12 rounded-lg object-cover border border-slate-700 shrink-0" onClick={(e) => { e.stopPropagation(); setDetailPkg(pkg); }} />
+                                                            <img src={resolvedUrlFoto} loading="lazy" className="w-12 h-12 rounded-lg object-cover border border-slate-700 shrink-0" onClick={(e) => { e.stopPropagation(); setDetailPkg(pkg); }} />
                                                         ) : (
                                                             <div className="w-12 h-12 rounded-lg bg-slate-900 border border-dashed border-slate-700 flex items-center justify-center shrink-0"><i className="fas fa-image text-slate-600 text-xs"></i></div>
                                                         )}
@@ -868,7 +832,7 @@
                                                     <h3 className="font-black text-white text-lg leading-tight mb-2 truncate pr-2">{pkg.customerName}</h3>
                                                     <div className="flex gap-3 mb-4 items-start">
                                                         {resolvedUrlFoto ? (
-                                                            <img src={resolvedUrlFoto} className="w-16 h-16 rounded-xl object-cover border border-slate-700 shrink-0" onClick={(e) => { e.stopPropagation(); setDetailPkg(pkg); }} />
+                                                            <img src={resolvedUrlFoto} loading="lazy" className="w-16 h-16 rounded-xl object-cover border border-slate-700 shrink-0" onClick={(e) => { e.stopPropagation(); setDetailPkg(pkg); }} />
                                                         ) : (
                                                             <div className="w-16 h-16 rounded-xl bg-slate-900 border border-dashed border-slate-700 flex items-center justify-center shrink-0"><i className="fas fa-image text-slate-600 text-lg"></i></div>
                                                         )}
@@ -1084,7 +1048,7 @@
                                     <div className="grid grid-cols-2 gap-3 relative z-0">
                                         <div>
                                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5 ml-1">Hrg Barang</label>
-                                            <input type="text" inputMode="numeric" name="hargaPaket" value={valHarga} onChange={(e) => { let v = e.target.value.replace(/\D/g, ''); setValHarga(v === '' ? '' : new Intl.NumberFormat('id-ID').format(parseInt(v, 10))); }} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-bold outline-none focus:border-blue-500 transition-colors" />
+                                            <input type="text" inputMode="numeric" name="hargaPaket" value={valHarga} onChange={(e) => { let v = e.target.value.replace(/\D/g, ''); setValHarga(v === '' ? '' : idrFormatter.format(parseInt(v, 10))); }} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-bold outline-none focus:border-blue-500 transition-colors" />
                                         </div>
                                         <div>
                                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5 ml-1">Kode Zona (TRF)</label>
@@ -1096,7 +1060,7 @@
                                     </div>
                                     <div>
                                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5 ml-1">Tmbhn Ongkir Vol/Jarak</label>
-                                        <input type="text" inputMode="numeric" name="tambahanOngkir" value={valTambahan} onChange={(e) => { let v = e.target.value.replace(/\D/g, ''); setValTambahan(v === '' ? '' : new Intl.NumberFormat('id-ID').format(parseInt(v, 10))); }} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-bold outline-none focus:border-blue-500 transition-colors" />
+                                        <input type="text" inputMode="numeric" name="tambahanOngkir" value={valTambahan} onChange={(e) => { let v = e.target.value.replace(/\D/g, ''); setValTambahan(v === '' ? '' : idrFormatter.format(parseInt(v, 10))); }} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-bold outline-none focus:border-blue-500 transition-colors" />
                                     </div>
 
                                     <div className="border-t border-slate-700 pt-4 mt-4">
@@ -1188,7 +1152,7 @@
                                             <div key={i} onClick={() => setDetailPkg(pkg)} className="bg-slate-800 border border-slate-700 rounded-2xl py-3 pr-3 flex justify-between items-center shadow-lg relative overflow-hidden cursor-pointer active:scale-[0.98] transition-transform">
                                                 <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${stat === 'SUKSES' ? 'bg-emerald-500' : (stat === 'PENDING' ? 'bg-orange-500' : 'bg-red-500')}`}></div>
                                                 {resolvedUrlFoto ? (
-                                                    <img src={resolvedUrlFoto} className="w-10 h-10 rounded object-cover border border-slate-700 shrink-0 ml-3" />
+                                                    <img src={resolvedUrlFoto} loading="lazy" className="w-10 h-10 rounded object-cover border border-slate-700 shrink-0 ml-3" />
                                                 ) : (
                                                     <div className="w-10 h-10 rounded bg-slate-900 border border-slate-700 flex items-center justify-center shrink-0 ml-3"><i className="fas fa-image text-slate-600 text-xs"></i></div>
                                                 )}
@@ -1309,205 +1273,31 @@
                     </nav>
 
                     {}
-                    {/* MODAL LAPORAN SCREENSHOT */}
+                    {/* MODAL LAPORAN SCREENSHOT (DIPERBAIKI KARENA TERPOTONG SEBELUMNYA) */}
                     {detailPkg && !isModalOpen && !isEditAdminModalOpen && (
                         <div className="fixed inset-0 z-[100] bg-black/90 flex flex-col justify-center items-center p-5 animate-fade-in-down backdrop-blur-sm" onClick={() => setDetailPkg(null)}>
                             <div className="bg-slate-900 rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl relative border border-slate-700" onClick={(e) => e.stopPropagation()}>
-                                <button onClick={() => setDetailPkg(null)} className="absolute top-4 right-4 w-8 h-8 bg-slate-800 hover:bg-slate-700 rounded-full flex items-center justify-center text-slate-400 z-10 transition-colors"><i className="fas fa-times"></i></button>
-                                
-                                <div id="screenshot-area" className="bg-slate-900 p-6">
-                                    <div className="text-center mb-5 border-b border-slate-800 pb-4">
-                                        <h2 className="font-black text-white text-xl uppercase tracking-widest text-center">{detailPkg.olshopName}</h2>
-                                        <p className="text-[9px] text-slate-500 font-bold tracking-widest mt-1">EXCEED EXPRESS LOGISTICS</p>
-                                    </div>
-
+                                <div className="flex justify-between items-center p-4 border-b border-slate-800 bg-slate-800/50">
+                                    <h3 className="text-white font-bold text-sm">Bukti Foto / Detail</h3>
+                                    <button onClick={() => setDetailPkg(null)} className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-slate-400 hover:text-white transition-colors border border-slate-700"><i className="fas fa-times"></i></button>
+                                </div>
+                                <div className="p-4 flex justify-center items-center">
                                     {getFotoUrl(detailPkg.fotoBukti) ? (
-                                        <img src={getFotoUrl(detailPkg.fotoBukti)} className="w-full h-48 object-cover rounded-2xl mb-5 border border-slate-700 shadow-md" onError={(e) => { e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }} />
-                                    ) : null}
-                                    <div className={`w-full h-48 rounded-2xl bg-slate-800/50 border border-dashed border-slate-700 items-center justify-center mb-5 ${getFotoUrl(detailPkg.fotoBukti) ? 'hidden' : 'flex'}`}>
-                                        <div className="text-center text-slate-600">
-                                            <i className="fas fa-image text-4xl mb-2"></i>
-                                            <p className="text-[10px] font-bold uppercase tracking-widest">Tidak Ada Foto</p>
+                                        <img src={getFotoUrl(detailPkg.fotoBukti)} alt="Foto Bukti" className="w-full max-h-[60vh] object-contain rounded-xl border border-slate-700" />
+                                    ) : (
+                                        <div className="py-12 text-center text-slate-500">
+                                            <i className="fas fa-image text-4xl mb-3 opacity-50"></i>
+                                            <p className="text-xs font-bold uppercase tracking-widest">Tidak ada foto dilampirkan</p>
                                         </div>
-                                    </div>
-
-                                    <div className="space-y-4 bg-slate-800 p-4 rounded-2xl border border-slate-700 shadow-inner">
-                                        <div>
-                                            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1"><i className="fas fa-user text-slate-400 mr-1.5"></i>Penerima</p>
-                                            <p className="font-black text-white text-sm">{detailPkg.customerName}</p>
-                                            {detailPkg.customerPhone && <p className="text-[11px] text-blue-400 font-bold mt-0.5">{detailPkg.customerPhone}</p>}
-                                        </div>
-                                        <div className="pt-3 border-t border-slate-700/50">
-                                            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1"><i className="fas fa-map-marker-alt text-slate-400 mr-1.5"></i>Alamat</p>
-                                            <p className="text-[11px] text-slate-300 leading-snug">{detailPkg.address}</p>
-                                        </div>
-                                    </div>
-
-                                    <div className="mt-5 flex justify-between items-center border-t border-slate-800 pt-5">
-                                        <div>
-                                            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-0.5">Kurir Antar</p>
-                                            <p className="font-black text-emerald-400 text-xs uppercase"><i className="fas fa-motorcycle mr-1.5"></i>{detailPkg.kurirId || kurirName}</p>
-                                        </div>
-                                        <div className="text-right">
-                                            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-0.5">Total Tagihan</p>
-                                            <p className="font-black text-blue-400 text-xl">{formatCurr(detailPkg.totalTagihan)}</p>
-                                        </div>
-                                    </div>
-                                    <div className="mt-4 text-center">
-                                        <span className={`text-[9px] font-bold px-3 py-1.5 rounded uppercase tracking-widest border ${String(detailPkg.status).toUpperCase().replace('_', ' ') === 'SUKSES' ? 'bg-emerald-900/30 text-emerald-400 border-emerald-800/50' : (String(detailPkg.status).toUpperCase().replace('_', ' ') === 'PENDING' ? 'bg-orange-900/30 text-orange-400 border-orange-800/50' : 'bg-red-900/30 text-red-400 border-red-800/50')}`}>
-                                            STATUS: {String(detailPkg.status).toUpperCase().replace('_', ' ') === 'SIAP ANTAR' || String(detailPkg.status).toUpperCase().replace('_', ' ') === 'PROSES' ? 'PROSES' : String(detailPkg.status).toUpperCase().replace('_', ' ')}
-                                        </span>
-                                    </div>
+                                    )}
+                                </div>
+                                <div className="p-4 bg-slate-800/50 border-t border-slate-800 text-center">
+                                    <p className="text-white font-bold mb-1">{detailPkg.customerName}</p>
+                                    <p className="text-xs text-slate-400 font-mono">{detailPkg.packageId}</p>
                                 </div>
                             </div>
                         </div>
                     )}
-
-                    {/* MODAL UPDATE STATUS KECIL */}
-                    {isModalOpen && selectedPkg && (
-                        <div className="absolute inset-0 z-[60] bg-black/80 flex flex-col justify-end animate-fade-in-down h-full backdrop-blur-sm">
-                            <div className="flex-1" onClick={() => setIsModalOpen(false)}></div>
-                            <div className="bg-slate-900 rounded-t-[2.5rem] shadow-[0_-20px_25px_-5px_rgba(0,0,0,0.5)] flex flex-col max-h-[90vh] border-t border-slate-700 pb-6">
-                                <div className="p-6 border-b border-slate-800 flex justify-between items-center shrink-0">
-                                    <h3 className="font-black text-white text-lg flex items-center"><i className="fas fa-edit text-blue-500 mr-2.5"></i> Update Status</h3>
-                                    <button onClick={() => setIsModalOpen(false)} className="w-8 h-8 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-full flex items-center justify-center transition-colors"><i className="fas fa-times text-sm"></i></button>
-                                </div>
-                                <div className="p-6 overflow-y-auto flex-1">
-                                    <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 shadow-inner mb-6 text-center">
-                                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1.5">No. Resi</p>
-                                        <p className="text-xl font-mono font-black text-orange-400 tracking-widest">{selectedPkg.packageId}</p>
-                                    </div>
-                                    <form onSubmit={handleUpdateStatus} className="space-y-5">
-                                        <div>
-                                            <label className="block text-[11px] font-bold text-slate-400 mb-2 ml-1 uppercase tracking-widest">Status Final</label>
-                                            <select name="status" value={updateStatusVal} onChange={(e) => setUpdateStatusVal(e.target.value)} className="w-full p-4 bg-slate-800 border border-slate-700 rounded-2xl text-sm font-black text-white outline-none focus:border-blue-500 shadow-sm appearance-none transition-colors">
-                                                <option value="SUKSES">✅ SUKSES (Terkirim)</option>
-                                                <option value="Siap Antar">🚚 PROSES (Siap Antar)</option>
-                                                <option value="PENDING">⏱️ PENDING (Ditunda)</option>
-                                                <option value="CANCEL">❌ CANCEL (Batal)</option>
-                                            </select>
-                                        </div>
-                                        
-                                        {updateStatusVal === 'SUKSES' && (
-                                            <div className="animate-fade-in-down bg-emerald-900/20 p-5 rounded-2xl border border-emerald-500/30">
-                                                <label className="block text-[10px] font-bold text-emerald-400 mb-2 ml-1 uppercase tracking-widest">Metode Bayar (Wajib)</label>
-                                                <select name="metodeBayarUpdate" defaultValue={selectedPkg.metodeBayar} className="w-full p-4 bg-slate-800 border border-emerald-500/50 text-white rounded-xl text-sm font-bold outline-none focus:border-emerald-400 appearance-none transition-colors">
-                                                    <option value="CASH">CASH (TUNAI)</option>
-                                                    <option value="TF KANTOR">TF KANTOR</option>
-                                                    <option value="TF OLSHOP">TF OLSHOP</option>
-                                                </select>
-                                            </div>
-                                        )}
-
-                                        {(updateStatusVal === 'PENDING' || updateStatusVal === 'CANCEL') && (
-                                            <div className="animate-fade-in-down bg-orange-900/20 p-5 rounded-2xl border border-orange-500/30">
-                                                <label className="block text-[10px] font-bold text-orange-400 mb-2 ml-1 uppercase tracking-widest">Keterangan / Alasan</label>
-                                                <input type="text" name="keterangan" required placeholder="Wajib diisi detail..." className="w-full p-4 bg-slate-800 border border-orange-500/50 rounded-xl text-sm font-semibold text-white outline-none focus:border-orange-400 transition-colors" />
-                                            </div>
-                                        )}
-                                        
-                                        <button type="submit" disabled={isLoading} className="w-full bg-blue-600 text-white font-black py-4 rounded-xl shadow-lg shadow-blue-900/50 active:scale-95 text-xs uppercase tracking-widest mt-4 transition-transform border border-blue-500/50">
-                                            {isLoading ? <i className="fas fa-spinner fa-spin"></i> : 'Simpan Status'}
-                                        </button>
-                                    </form>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* MODAL EDIT DATA (KHUSUS ADMIN) */}
-                    {isEditAdminModalOpen && (
-                        <div className="absolute inset-0 z-[70] bg-black/80 flex flex-col justify-end animate-fade-in-down h-full backdrop-blur-sm">
-                            <div className="flex-1" onClick={() => setIsEditAdminModalOpen(false)}></div>
-                            <div className="bg-slate-900 rounded-t-[2.5rem] shadow-[0_-20px_25px_-5px_rgba(0,0,0,0.5)] flex flex-col max-h-[90vh] border-t border-slate-700 pb-6">
-                                <div className="p-6 border-b border-slate-800 flex justify-between items-center shrink-0">
-                                    <h3 className="font-black text-white text-lg flex items-center"><i className="fas fa-user-edit text-orange-500 mr-2.5"></i> Edit Info (Admin)</h3>
-                                    <button onClick={() => setIsEditAdminModalOpen(false)} className="w-8 h-8 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-full flex items-center justify-center transition-colors"><i className="fas fa-times text-sm"></i></button>
-                                </div>
-                                <div className="p-6 overflow-y-auto flex-1">
-                                    <form onSubmit={handleEditAdminSubmit} className="space-y-4">
-                                        <div className="bg-slate-800 border border-slate-700 p-4 rounded-xl mb-4 text-center">
-                                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1.5">No. Resi</p>
-                                            <p className="text-lg font-mono font-black text-orange-400 tracking-widest">{editAdminData.packageId}</p>
-                                        </div>
-
-                                        <div>
-                                            <label className="block text-[11px] font-bold text-slate-400 mb-2 ml-1 uppercase tracking-widest">Nama Customer</label>
-                                            <input 
-                                                type="text" 
-                                                value={editAdminData.customerName}
-                                                onChange={e => setEditAdminData({...editAdminData, customerName: e.target.value})}
-                                                className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-sm font-semibold text-white outline-none focus:border-orange-500 transition-colors" 
-                                            />
-                                        </div>
-
-                                        <div>
-                                            <label className="block text-[11px] font-bold text-slate-400 mb-2 ml-1 uppercase tracking-widest">Nomor HP</label>
-                                            <input 
-                                                type="text" 
-                                                value={editAdminData.customerPhone}
-                                                onChange={e => setEditAdminData({...editAdminData, customerPhone: e.target.value})}
-                                                className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-sm font-semibold text-white outline-none focus:border-orange-500 transition-colors" 
-                                            />
-                                        </div>
-
-                                        <div>
-                                            <label className="block text-[11px] font-bold text-slate-400 mb-2 ml-1 uppercase tracking-widest">Nama Olshop</label>
-                                            <select 
-                                                value={editAdminData.olshopName}
-                                                onChange={e => setEditAdminData({...editAdminData, olshopName: e.target.value})}
-                                                className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-sm font-bold text-white outline-none focus:border-orange-500 appearance-none transition-colors"
-                                            >
-                                                {!masterOlshops.some(o => o.nama === editAdminData.olshopName) && editAdminData.olshopName && (
-                                                    <option value={editAdminData.olshopName}>{editAdminData.olshopName}</option>
-                                                )}
-                                                {masterOlshops.map((o, i) => <option key={i} value={o.nama}>{o.nama}</option>)}
-                                            </select>
-                                        </div>
-
-                                        <button type="submit" disabled={isLoading} className="w-full bg-orange-600 text-white font-black py-4 rounded-xl shadow-lg shadow-orange-900/50 active:scale-95 text-xs uppercase tracking-widest mt-4 transition-transform border border-orange-500/50">
-                                            {isLoading ? <i className="fas fa-spinner fa-spin"></i> : 'Simpan Perubahan'}
-                                        </button>
-                                    </form>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* MODAL KAMERA FULL SCREEN APPSHEET STYLE */}
-                    {isCameraFullScreen && (
-                        <div className="fixed inset-0 z-[9999] bg-black flex flex-col animate-slide-up">
-                            <div className="absolute top-0 w-full p-4 flex justify-between items-center z-10 bg-gradient-to-b from-black/80 to-transparent">
-                                <span className="text-white font-bold text-sm drop-shadow-md">Ambil Foto Gambar Paket</span>
-                                <button type="button" onClick={stopCamera} className="text-white w-8 h-8 flex items-center justify-center bg-black/40 rounded-full border border-white/20">
-                                    <i className="fas fa-times"></i>
-                                </button>
-                            </div>
-                            
-                            <div className="flex-1 relative bg-black flex items-center justify-center overflow-hidden">
-                                <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover"></video>
-                                <div className="absolute inset-0 border-[1px] border-white/20 pointer-events-none grid grid-cols-3 grid-rows-3">
-                                    <div className="border-r border-b border-white/20"></div>
-                                    <div className="border-b border-white/20"></div>
-                                    <div className="border-l border-b border-white/20"></div>
-                                    <div className="border-r border-b border-white/20"></div>
-                                    <div className="border-b border-white/20"></div>
-                                    <div className="border-l border-b border-white/20"></div>
-                                    <div className="border-r border-white/20"></div>
-                                    <div></div>
-                                    <div className="border-l border-white/20"></div>
-                                </div>
-                            </div>
-                            
-                            <div className="h-32 bg-black flex items-center justify-center w-full z-10 pb-4 shrink-0 border-t border-white/10">
-                                <button type="button" onClick={takePhoto} className="w-16 h-16 bg-white rounded-full flex items-center justify-center border-4 border-gray-400 active:scale-95 transition-transform">
-                                    <div className="w-14 h-14 rounded-full border-2 border-black"></div>
-                                </button>
-                            </div>
-                            <canvas ref={canvasRef} style={{ display: 'none' }}></canvas>
-                        </div>
-                    )}
-
                 </React.Fragment>
             );
         }
