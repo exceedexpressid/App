@@ -70,6 +70,11 @@
             const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem('ex_kurirId'));
             const [isOffline, setIsOffline] = useState(!navigator.onLine);
             
+            // STATE ANTREAN OFFLINE (PENDING SYNC)
+            const [pendingSync, setPendingSync] = useState(() => {
+                try { return JSON.parse(localStorage.getItem('ex_pending_sync') || '[]'); } catch(e) { return []; }
+            });
+
             const [activeTab, setActiveTab] = useState('tugas'); 
             const [tugasViewMode, setTugasViewMode] = useState('standard'); 
             const [isLoading, setIsLoading] = useState(false);
@@ -132,11 +137,62 @@
 
             const isMasterKurir = kurirId === 'exceedexpress.id@gmail.com';
 
+            // ==========================================================
+            // LOGIKA PROSES ANTREAN (SYNC QUEUE) SAAT ONLINE
+            // ==========================================================
+            const processSyncQueue = async () => {
+                const queueStr = localStorage.getItem('ex_pending_sync');
+                if (!queueStr) return;
+                let queue = JSON.parse(queueStr);
+                if (queue.length === 0) return;
+
+                setIsLoading(true); 
+                setLoadingMessage(`Mengirim ${queue.length} Data Tertunda...`);
+                let remainingQueue = [];
+
+                for (let i = 0; i < queue.length; i++) {
+                    const item = queue[i];
+                    try {
+                        const formData = new URLSearchParams();
+                        formData.append('action', item.type);
+                        Object.keys(item.payload).forEach(key => {
+                            if (item.payload[key] !== undefined && item.payload[key] !== null) {
+                                formData.append(key, item.payload[key]);
+                            }
+                        });
+
+                        const res = await fetch(SCRIPT_URL, { method: 'POST', body: formData, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+                        const result = await res.json();
+                        
+                        if (result.status !== 'success') {
+                            console.error("Gagal sinkron satu data:", result.message);
+                        }
+                    } catch (err) {
+                        remainingQueue.push(item);
+                    }
+                }
+
+                localStorage.setItem('ex_pending_sync', JSON.stringify(remainingQueue));
+                setPendingSync(remainingQueue);
+                setIsLoading(false);
+                
+                if (remainingQueue.length === 0) {
+                    alert("Seluruh data offline berhasil dikirim ke server!");
+                    loadData(); 
+                }
+            };
+
+            // Pendeteksi Sinyal Otomatis
             useEffect(() => {
-                const handleOnline = () => setIsOffline(false);
+                const handleOnline = () => {
+                    setIsOffline(false);
+                    processSyncQueue();
+                };
                 const handleOffline = () => setIsOffline(true);
+                
                 window.addEventListener('online', handleOnline);
                 window.addEventListener('offline', handleOffline);
+                
                 return () => {
                     window.removeEventListener('online', handleOnline);
                     window.removeEventListener('offline', handleOffline);
@@ -184,7 +240,6 @@
                         }
                     }
                 } catch(e) { 
-                    // JIKA GAGAL KONEKSI, GUNAKAN DATA OFFLINE
                     setIsOffline(true);
                     const backupDataStr = localStorage.getItem('ex_offline_backup_data');
                     if(backupDataStr) {
@@ -365,21 +420,21 @@
             };
             const retakePhoto = () => { setCapturedPhoto(null); startCamera(); };
 
-            const videoCallbackRef = (node) => {
-                videoRef.current = node;
-                if (node && cameraStream) {
-                    node.srcObject = cameraStream;
-                    node.setAttribute('playsinline', true);
-                    node.muted = true;
-                    node.play().catch(e => console.error("Kamera ditahan browser:", e));
+            // FIX KAMERA HP BLANK: Menggunakan useEffect agar stream pasti menempel
+            useEffect(() => {
+                if (isCameraFullScreen && cameraStream && videoRef.current) {
+                    videoRef.current.srcObject = cameraStream;
+                    videoRef.current.setAttribute('playsinline', 'true');
+                    videoRef.current.muted = true;
+                    videoRef.current.play().catch(e => console.error("Kamera ditahan browser:", e));
                 }
-            };
+            }, [isCameraFullScreen, cameraStream]);
 
             useEffect(() => { if (activeTab !== 'input' && isCameraFullScreen) stopCamera(); }, [activeTab, isCameraFullScreen]);
 
             const handleTambahJemput = async (e) => {
                 e.preventDefault();
-                if (isOffline) return alert("Anda sedang offline. Tidak bisa menambah jemputan.");
+                if (isOffline || !navigator.onLine) return alert("Anda sedang offline. Tidak bisa menambah jemputan.");
                 if (!inputJemputOlshop || !inputJemputAddress) return alert("Pilih Olshop dan isi Alamat!");
                 setIsLoading(true); setLoadingMessage('Menambah Jemputan...');
                 try {
@@ -401,8 +456,15 @@
             };
 
             const handleAmbilJemputan = async (idJemput) => {
-                if (isOffline) return alert("Offline. Harap cari sinyal untuk mengambil jemputan.");
                 if(!window.confirm("Ambil tugas jemputan ini?")) return;
+
+                if (!navigator.onLine || isOffline) {
+                    const q = [...pendingSync, { type: 'ambilJemputan', payload: { idJemput, kurirId, kurirNama: kurirName }, ts: Date.now() }];
+                    setPendingSync(q); localStorage.setItem('ex_pending_sync', JSON.stringify(q));
+                    setJemputans(jemputans.map(j => j.idJemput === idJemput ? { ...j, status: 'Diambil', kurirId: kurirId } : j));
+                    alert("Koneksi Putus! Tugas disimpan ke memori HP. Otomatis sync jika online."); return;
+                }
+
                 setIsLoading(true); setLoadingMessage('Mengambil Tugas...');
                 try {
                     const formData = new URLSearchParams(); formData.append('action', 'ambilJemputan'); formData.append('idJemput', idJemput); formData.append('kurirId', kurirId); formData.append('kurirNama', kurirName);
@@ -413,8 +475,15 @@
             };
 
             const handleSelesaiJemputan = async (idJemput) => {
-                if (isOffline) return alert("Offline. Harap cari sinyal untuk selesaikan jemputan.");
                 if(!window.confirm("Tandai jemputan selesai?")) return;
+
+                if (!navigator.onLine || isOffline) {
+                    const q = [...pendingSync, { type: 'selesaiJemputan', payload: { idJemput }, ts: Date.now() }];
+                    setPendingSync(q); localStorage.setItem('ex_pending_sync', JSON.stringify(q));
+                    setJemputans(jemputans.map(j => j.idJemput === idJemput ? { ...j, status: 'Selesai' } : j));
+                    alert("Koneksi Putus! Status Selesai disimpan di memori HP."); return;
+                }
+
                 setIsLoading(true); setLoadingMessage('Menyelesaikan Tugas...');
                 try {
                     const formData = new URLSearchParams(); formData.append('action', 'selesaiJemputan'); formData.append('idJemput', idJemput);
@@ -433,10 +502,21 @@
             };
 
             const handleUpdateStatus = async (e) => {
-                e.preventDefault(); 
-                if (isOffline) return alert("Offline. Harap sambungkan ke internet untuk update status.");
-                getLocation();
+                e.preventDefault(); getLocation();
                 const nStatus = e.target.status.value; const nKet = e.target.keterangan ? e.target.keterangan.value : ""; const nMetode = e.target.metodeBayarUpdate ? e.target.metodeBayarUpdate.value : "";
+
+                if (!navigator.onLine || isOffline) {
+                    const payload = { packageId: selectedPkg.packageId, status: nStatus, keterangan: nKet, metodeBayar: nMetode, titikLokasi: currentLocation };
+                    if (capturedPhoto) payload.fotoBase64 = capturedPhoto; 
+                    const q = [...pendingSync, { type: 'updateStatus', payload, ts: Date.now() }];
+                    setPendingSync(q); localStorage.setItem('ex_pending_sync', JSON.stringify(q));
+                    
+                    const updatedPackages = packages.map(p => p.packageId === selectedPkg.packageId ? { ...p, status: nStatus, keterangan: nKet, metodeBayar: nMetode || p.metodeBayar } : p);
+                    setPackages(updatedPackages);
+                    alert("Koneksi Putus! Status DISIMPAN DI HP. Akan otomatis terkirim ke kantor saat ada sinyal internet.");
+                    setIsModalOpen(false);
+                    return;
+                }
 
                 setIsLoading(true); setLoadingMessage('Menyimpan Status...');
                 try {
@@ -462,7 +542,7 @@
 
             const handleEditAdminSubmit = async (e) => {
                 e.preventDefault();
-                if (isOffline) return alert("Offline. Tidak bisa edit data.");
+                if (isOffline || !navigator.onLine) return alert("Offline. Tidak bisa edit data.");
                 setIsLoading(true); setLoadingMessage('Menyimpan Perubahan...');
                 try {
                     const formData = new URLSearchParams();
@@ -483,14 +563,29 @@
             };
 
             const handleInputBaru = async (e) => {
-                e.preventDefault(); 
-                if (isOffline) return alert("Offline. Harap sambungkan ke internet untuk input resi baru.");
-                getLocation();
+                e.preventDefault(); getLocation();
                 const olshopName = inputOlshopSearch; const customerName = e.target.customerName.value; const address = e.target.address.value;
                 if (!olshopName || !customerName || !address) { alert("Olshop, Customer, dan Alamat wajib!"); return; }
                 const zonaSelect = e.target.ongkirKode; const ongkirAngka = zonaSelect.options[zonaSelect.selectedIndex].getAttribute('data-harga') || 0; const ongkirKodeTeks = zonaSelect.value; 
                 const hargaPaket = e.target.hargaPaket.value.replace(/\./g, '') || 0; const tambahanOngkir = e.target.tambahanOngkir.value.replace(/\./g, '') || 0;
                 
+                if (!navigator.onLine || isOffline) {
+                    const idPaket = "EXCD" + Math.floor(100000 + Math.random() * 900000);
+                    const payload = { 
+                        idPaket, olshopName, customerName, customerPhone: e.target.customerPhone.value, 
+                        address, hargaPaket, ongkirKode: ongkirKodeTeks, ongkirAngka, tambahanOngkir, 
+                        status: inputFormStatus, metodeBayar: inputFormStatus === 'SUKSES' ? e.target.metodeBayar.value : '',
+                        keterangan: (inputFormStatus === 'PENDING' || inputFormStatus === 'CANCEL') ? e.target.keteranganForm.value : '',
+                        kurirId, titikLokasi: currentLocation 
+                    };
+                    if (capturedPhoto) payload.fotoBase64 = capturedPhoto;
+                    const q = [...pendingSync, { type: 'addPackage', payload, ts: Date.now() }];
+                    setPendingSync(q); localStorage.setItem('ex_pending_sync', JSON.stringify(q));
+                    alert(`Sinyal Putus! RESI (${idPaket}) DISIMPAN DI HP. Akan otomatis terkirim saat ada internet.`);
+                    e.target.reset(); setInputOlshopSearch(''); setValHarga(''); setValTambahan(''); setCapturedPhoto(null); setInputFormStatus('Siap Antar'); setActiveTab('tugas');
+                    return;
+                }
+
                 setIsLoading(true); setLoadingMessage('Mendaftar Resi...');
                 try {
                     const idPaket = "EXCD" + Math.floor(100000 + Math.random() * 900000);
@@ -635,7 +730,11 @@
             if (!isLoggedIn) {
                 return (
                     <div className="flex h-full items-center justify-center p-6 w-full relative">
-                        {isOffline && <div className="absolute top-0 w-full bg-red-600 text-white text-center text-[10px] font-bold py-1 z-50">KONEKSI TERPUTUS - OFFLINE MODE</div>}
+                        {isOffline && (
+                            <div className="absolute top-0 w-full bg-red-600 text-white text-center text-[10px] font-bold py-1 z-50 animate-pulse">
+                                KONEKSI TERPUTUS - OFFLINE MODE AKTIF
+                            </div>
+                        )}
                         <div className="w-full bg-slate-800 p-8 rounded-3xl border border-slate-700 shadow-2xl relative z-10">
                             <div className="flex justify-center mb-6"><div className="w-20 h-20 bg-blue-500/10 rounded-2xl flex items-center justify-center border border-blue-500/20"><i className="fas fa-motorcycle text-5xl text-blue-500"></i></div></div>
                             <h1 className="text-3xl font-black text-white text-center mb-2 tracking-tight">DRIVER LOGIN</h1>
@@ -662,10 +761,21 @@
                 <React.Fragment>
                     {isOffline && (
                         <div className="bg-red-600 text-white text-center text-[10px] font-bold py-1 z-50 absolute top-0 w-full animate-pulse">
-                            KONEKSI TERPUTUS - OFFLINE MODE AKTIF (Tampilkan Data Cadangan)
+                            KONEKSI TERPUTUS - OFFLINE MODE AKTIF (Menyimpan di HP)
                         </div>
                     )}
                     
+                    {pendingSync.length > 0 && (
+                        <div className="bg-orange-600 text-white text-[10px] font-bold py-2 px-4 z-50 flex justify-between items-center shrink-0 border-b border-orange-800 shadow-md">
+                            <span><i className="fas fa-cloud-upload-alt mr-1.5"></i> {pendingSync.length} Data Menunggu Sinyal Internet</span>
+                            {isOffline ? (
+                                <span className="bg-orange-800/50 px-2 py-0.5 rounded italic">Offline</span>
+                            ) : (
+                                <button onClick={processSyncQueue} className="bg-white text-orange-600 px-3 py-1 rounded shadow-sm active:scale-90 transition-transform"><i className="fas fa-sync-alt mr-1"></i> Sync Sekarang</button>
+                            )}
+                        </div>
+                    )}
+
                     {isLoading && (
                         <div className="absolute inset-0 z-[999] bg-slate-900/80 backdrop-blur-sm flex flex-col items-center justify-center">
                             <div className="w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mb-3"></div>
@@ -974,7 +1084,7 @@
                                     <div className="grid grid-cols-2 gap-3 relative z-0">
                                         <div>
                                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5 ml-1">Hrg Barang</label>
-                                            <input type="text" inputMode="numeric" name="hargaPaket" value={valHarga} onChange={(e) => { let v = e.target.value.replace(/\D/g, ''); setValHarga(v ? new Intl.NumberFormat('id-ID').format(v) : ''); }} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-bold outline-none focus:border-blue-500 transition-colors" />
+                                            <input type="text" inputMode="numeric" name="hargaPaket" value={valHarga} onChange={(e) => { let v = e.target.value.replace(/\D/g, ''); setValHarga(v === '' ? '' : new Intl.NumberFormat('id-ID').format(parseInt(v, 10))); }} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-bold outline-none focus:border-blue-500 transition-colors" />
                                         </div>
                                         <div>
                                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5 ml-1">Kode Zona (TRF)</label>
@@ -986,7 +1096,7 @@
                                     </div>
                                     <div>
                                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5 ml-1">Tmbhn Ongkir Vol/Jarak</label>
-                                        <input type="text" inputMode="numeric" name="tambahanOngkir" value={valTambahan} onChange={(e) => { let v = e.target.value.replace(/\D/g, ''); setValTambahan(v ? new Intl.NumberFormat('id-ID').format(v) : ''); }} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-bold outline-none focus:border-blue-500 transition-colors" />
+                                        <input type="text" inputMode="numeric" name="tambahanOngkir" value={valTambahan} onChange={(e) => { let v = e.target.value.replace(/\D/g, ''); setValTambahan(v === '' ? '' : new Intl.NumberFormat('id-ID').format(parseInt(v, 10))); }} className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white font-bold outline-none focus:border-blue-500 transition-colors" />
                                     </div>
 
                                     <div className="border-t border-slate-700 pt-4 mt-4">
@@ -1073,10 +1183,16 @@
                                         if (stat === 'SUKSES') bgBadge = 'bg-emerald-900/30 text-emerald-400 border-emerald-800/50';
                                         if (stat === 'PENDING') bgBadge = 'bg-orange-900/30 text-orange-400 border-orange-800/50';
                                         if (stat === 'CANCEL' || stat === 'BATAL') bgBadge = 'bg-red-900/30 text-red-400 border-red-800/50';
+                                        const resolvedUrlFoto = getFotoUrl(pkg.fotoBukti);
                                         return (
                                             <div key={i} onClick={() => setDetailPkg(pkg)} className="bg-slate-800 border border-slate-700 rounded-2xl py-3 pr-3 flex justify-between items-center shadow-lg relative overflow-hidden cursor-pointer active:scale-[0.98] transition-transform">
                                                 <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${stat === 'SUKSES' ? 'bg-emerald-500' : (stat === 'PENDING' ? 'bg-orange-500' : 'bg-red-500')}`}></div>
-                                                <div className="pl-4 flex-1 min-w-0">
+                                                {resolvedUrlFoto ? (
+                                                    <img src={resolvedUrlFoto} className="w-10 h-10 rounded object-cover border border-slate-700 shrink-0 ml-3" />
+                                                ) : (
+                                                    <div className="w-10 h-10 rounded bg-slate-900 border border-slate-700 flex items-center justify-center shrink-0 ml-3"><i className="fas fa-image text-slate-600 text-xs"></i></div>
+                                                )}
+                                                <div className="pl-3 flex-1 min-w-0">
                                                     <p className="font-bold text-white text-xs truncate mb-1">{pkg.customerName}</p>
                                                     {pkg.customerPhone && <p className="text-[9px] text-slate-400 mb-0.5 font-bold"><i className="fas fa-phone mr-1.5 text-emerald-500"></i>{pkg.customerPhone}</p>}
                                                     <p className="text-[9px] text-slate-500 truncate font-mono">{pkg.packageId} • <span className="text-orange-400/80 font-sans font-bold">{pkg.olshopName}</span></p>
@@ -1369,7 +1485,7 @@
                             </div>
                             
                             <div className="flex-1 relative bg-black flex items-center justify-center overflow-hidden">
-                                <video ref={videoCallbackRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover"></video>
+                                <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover"></video>
                                 <div className="absolute inset-0 border-[1px] border-white/20 pointer-events-none grid grid-cols-3 grid-rows-3">
                                     <div className="border-r border-b border-white/20"></div>
                                     <div className="border-b border-white/20"></div>
